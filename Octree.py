@@ -45,8 +45,9 @@ class roundToMultiple:
 
 grid = {}
 grid[(0,0)] = 1
+grid[(0,0)] = 1
 grid[(3,-1)] = 1
-grid[(9, -2)] = 1
+grid[(9, -3)] = 1
 
 #Convert to octree
 xMax = max( grid.keys(), key=itemgetter( 0 ) )[0]
@@ -59,7 +60,7 @@ minRange = roundToMultiple( 8, xMin, yMin ).down()
 maxRange = roundToMultiple( 8, xMax, yMax ).up()
 mainDepthLevel = max( [abs( i ) for i in minRange+maxRange] )
 mainDepthLevel = int( math.log( mainDepthLevel/2, 2 ) )
-minDepthLevel = -2 #0 has accuracy of 1, -1 of 0.5 etc
+minDepthLevel = 0 #0 has accuracy of 1, -1 of 0.5 etc
 
 #Start octree dictionary
 octreeStructure = [( 1, 1 ), ( 1, -1 ), ( -1, 1 ), ( -1, -1 )]
@@ -72,23 +73,26 @@ octreeData = {"Depth":mainDepthLevel, "Data": dict.fromkeys( octreeStructure, Fa
 originalCoordinates = dict.fromkeys( grid.keys() )
 for relativeCoordinate in originalCoordinates.keys():
     multiplierList = {0: [], 1: []}
+    exactMatch = {0: [], 1: []}
     for key in multiplierList:
         maxMultiplier = ( mainDepthLevel-1 )*4
         totalMultiplier = 0
         while maxMultiplier > pow( 2, minDepthLevel )*0.9:
-            currentDepthIteration += 1
             #Detect if it should be positive or negative
             currentMultiplier = maxMultiplier
-            
             if relativeCoordinate[key] >= totalMultiplier:
                 multiplierList[key].append( 1 )
             else:
                 multiplierList[key].append( -1 )
                 currentMultiplier *= -1
+            if relativeCoordinate[key] == totalMultiplier:
+                exactMatch[key].append( True )
+            else:
+                exactMatch[key].append( False )
             #Append to total
             totalMultiplier += currentMultiplier
             maxMultiplier /= 2.0
-            
+    
     originalCoordinates[relativeCoordinate] = multiplierList
 
 
@@ -118,3 +122,23 @@ for relativeCoordinate in originalCoordinates:
         #Fill in depth
         editDictionary( octreeData, depthDictionaryPath[:-2-currentDepth*2]+["Depth", currentDepth+minDepthLevel], False )
         currentDepth += 1
+
+#Calculate placement of cubes
+def drawCubes( dictionaryValue, startingCoordinates=[0, 0] ):
+    currentDepth = dictionaryValue["Depth"]
+    depthMultiplier = pow( 2, currentDepth )
+    for key in dictionaryValue["Data"].keys():
+        newCoordinate = [depthMultiplier*i for i in key]
+        newCoordinate = [x+y for x, y in zip( newCoordinate, startingCoordinates )]
+        newDictionaryValue = dictionaryValue["Data"][key]
+        if newDictionaryValue == 1:
+            cubeSize = 2*2**currentDepth
+            newCube = py.polyCube( h=5, w=cubeSize, d=cubeSize )[0]
+            py.move( newCube, ( newCoordinate[0], 0, newCoordinate[1] ) )
+            
+        elif type( newDictionaryValue ) == dict:
+            drawCubes( newDictionaryValue, newCoordinate )
+
+#Use test value for a bigger cube
+editDictionary( octreeData, ["Data",(-1,-1),1] )
+drawCubes( octreeData )
