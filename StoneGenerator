@@ -1,0 +1,219 @@
+import pymel.core as py
+import maya.cmds as cmds
+import random as rd
+from time import time
+def ph_deleteRandomVerts(objectSelection,vertDeleteChance):
+   
+    numFaces = py.polyEvaluate( objectSelection, face = True )
+    numVerts = py.polyEvaluate( objectSelection, vertex = True )
+   
+    vertIterations = int( numFaces / rd.uniform( 1.5, 3 ) )
+    if vertDeleteChance > 1:
+        vertIterations *= vertDeleteChance
+    print str(vertIterations) + ' vertex delete iterations'
+    
+    for i in range ( 0, vertIterations ):
+        #select random vertex
+        vertNum = rd.randint( 0, numVerts - 1 )
+        vertSelection = py.general.MeshEdge( objectSelection + '.vtx[' + str( vertNum ) + ']' )
+        vertEdges = vertSelection.numConnectedEdges()
+          
+        #delete vertex
+        if vertEdges > 5 and rd.uniform( 0, 1 ) < vertDeleteChance:
+            py.polyDelEdge( vertSelection, cv=True )
+           
+    return vertIterations
+
+def ph_deleteVertsComplex(allValues, objectSelection ):
+    
+    vertDeleteComplexity = allValues[0][0]
+    vertDeleteChance = allValues[0][1]
+    averageVertex = allValues[0][2]
+    deleteConstructionHistory = allValues[2][0]
+    
+    #amount of detail to add
+    originalFaces = py.polyEvaluate( objectSelection, face = True )
+    print "Subdividing object..."
+    py.polySubdivideFacet(objectSelection, dv = vertDeleteComplexity)
+    print "Increased from " + str( originalFaces ) + " to " + str( py.polyEvaluate( objectSelection, face = True ) ) + "faces"
+    
+    #run passes of vertex delete code
+    vertIterations = 0
+    for i in range( vertDeleteComplexity + 1 ):
+        print 'Deleting vertices: Pass ' + str(i+1) + '...'
+        vertIterations += ph_deleteRandomVerts(objectSelection,vertDeleteChance)
+    
+    #cut edges at end - doing it in middle takes too long
+    print 'Cutting edges...'
+    edgesCut = ph_cutEdges(objectSelection, False)
+    
+    if deleteConstructionHistory == True:
+        py.delete( objectSelection, ch = True )
+    py.polyAverageVertex( objectSelection+'.vtx[*]', i = averageVertex )
+    py.polySoftEdge( objectSelection, angle = 180 )
+    return vertIterations + edgesCut
+ 
+def ph_cutEdges( objectSelection, divideAtEnd = True ):
+    numToCut = py.polyEvaluate( objectSelection, face = True )/2
+    allCuts = []
+    startTime = time()
+    #cut
+    for i in range( numToCut ):
+        numFaces = py.polyEvaluate( objectSelection, face = True )
+        allCuts.append( py.polyCut( objectSelection+'.f['+str(rd.randint(0,numFaces))+']' )[0] )
+    #rotate
+    for i in range( len( allCuts ) ):
+        py.setAttr( allCuts[i]+'.cutPlaneRotateX', rd.uniform( 0, 360 ) )
+        py.setAttr( allCuts[i]+'.cutPlaneRotateY', rd.uniform( 0, 360 ) )
+        py.setAttr( allCuts[i]+'.cutPlaneRotateZ', rd.uniform( 0, 360 ) )
+    endTime = time()
+    if divideAtEnd == True:
+        py.polySubdivideFacet( objectSelection )
+    print str(i+1) + ' edges cut in ' + ph_timeOutput( startTime, endTime, 2 )
+    return i+1
+
+def ph_timeOutput(startTime, endTime, formatDecimals = 0):
+    #calculate decimal points
+    if formatDecimals > 0:
+        decimals = float( pow( 10, formatDecimals ) )
+    else:
+        decimals = int( pow( 10, formatDecimals ) )
+    #calculate seconds and minutes
+    seconds = endTime - startTime
+    #cut decimal points off seconds
+    secondsDecimal = int(seconds*decimals)/decimals
+    #make sure it's correct grammar
+    if (formatDecimals == 0) and (secondsDecimal == 1):
+        sec = " second"
+    else:
+        sec = " seconds"
+    return str( secondsDecimal ) + sec
+ 
+def ph_finalScale( vertDeleteComplexity, averageVertex ):
+    #get initial scale value for 0 iterations
+    finalScale = 1.2
+    for i in range( vertDeleteComplexity ):
+        finalScale = ( finalScale-1 )/2 + 1
+    #fix to stop exponentially scaling upwards
+    i = averageVertex 
+    if averageVertex > 5:
+        i = 5
+    #calculate final scale
+    for j in range( i ):
+        finalScale += pow( finalScale, 0.5 ) - 1
+    return finalScale
+
+def ph_smoothSimple(allValues, objectSelection ):
+    smoothResult = allValues[1][0]
+    if smoothResult == True:
+        oldFaces = py.polyEvaluate( objectSelection, face = True )
+        #add divisions then smooth
+        py.polySmooth( objectSelection, continuity = 0.2 )
+        py.polySmooth( objectSelection )
+        py.polyTriangulate( objectSelection )
+        smoothFaces = py.polyEvaluate( objectSelection, face = True )
+        print "Smoothed from " + str( oldFaces ) + " to " + str( smoothFaces ) + " faces"
+        #run reduction but keep maximum quality
+        #py.polyReduce( objectSelection, p = 50, keepQuadsWeight = 0 )
+        #reducedFaces = py.polyEvaluate( objectSelection, face = True )
+        #print "Reduced to " + str( reducedFaces ) + " faces"
+'''
+clay/grass = complexity 1 high avg vtx
+stone = complexity 3 low avg vtx
+rocks = compexity 2 chance 2 low avg vtx 
+'''
+   
+vertDeleteComplexity = 3
+vertDeleteChance = 0.7
+smoothResult = True
+intersectObjects = True
+superSmooth = False
+averageVertex = 1
+
+deleteOriginalConstructionHistory = True
+deleteBooleanConstructionHistory = False
+
+selections = py.ls(selection = True)
+newSelections = []
+allValues = []
+allValues.append( [vertDeleteComplexity, vertDeleteChance, averageVertex] )
+allValues.append( [smoothResult, superSmooth] )
+allValues.append( [deleteOriginalConstructionHistory, deleteBooleanConstructionHistory] )
+allValues.append( [intersectObjects] )
+#0 = vertex delete
+#1 = smooth
+#2 = history (0 = original 1 = construction)
+#3 = intersect
+    
+# scaling upwards to reduce errors
+upscaleMax = pow(16,vertDeleteComplexity)
+if upscaleMax < 1000:
+    upscaleMax = 1000
+    
+for i in range(len(selections)):
+    
+    #center object
+    originalSelection = selections[i]    
+    objectTranslation = originalSelection.getTranslation()
+    objectRotation = originalSelection.getRotation()
+    py.move( originalSelection, (0,0,0) )
+    py.rotate( originalSelection, (0,0,0) )
+    
+    #get size of object
+    objectBB = originalSelection.getBoundingBox()
+    objectWidth = abs( objectBB[1][0] - objectBB[0][0] )
+    objectHeight = abs( objectBB[1][1] - objectBB[0][1] )
+    objectDepth = abs( objectBB[1][2] - objectBB[0][2] )
+    averageLength = ( objectWidth + objectHeight + objectDepth ) / 3
+    
+    #scale upwards
+    if averageLength < upscaleMax:
+        upscaleAmount = upscaleMax / averageLength
+        py.scale( originalSelection, (upscaleAmount,upscaleAmount,upscaleAmount) ) 
+            
+    #duplicate if boolean is required
+    if intersectObjects == True:
+        duplicatedSelection = py.duplicate( originalSelection )[0]
+        bothSelections = [originalSelection, duplicatedSelection]
+    else:
+        bothSelections = [originalSelection]
+    
+    #delete vertices
+    for k in range( len(bothSelections) ):
+        objectSelection = bothSelections[k]
+        print "Object " + str( i*(k+1)+1+k ) + " of " + str( len( selections )*(k+1) ) + ": (" + str( objectSelection ) + ")"
+        totalIterations = ph_deleteVertsComplex( allValues, objectSelection )
+        print str(totalIterations) + " total iterations"
+        ph_smoothSimple( allValues, objectSelection )
+        print
+              
+    print
+    finalScale = ph_finalScale( vertDeleteComplexity, averageVertex )
+    if intersectObjects == True:
+        groupName = 'temp'
+        try:
+            py.select( groupName )
+        except:
+            py.group( em = True, n = groupName )
+        py.parent( bothSelections[0], bothSelections[1], groupName )
+        print "Intersecting objects " + str( bothSelections[0] ) + " and " + str( bothSelections[1] ) + "..."
+        objectSelection = cmds.polyCBoolOp( str(bothSelections[0]), str(bothSelections[1]), operation = 3, name = str(bothSelections[0]) )[0]
+        if deleteBooleanConstructionHistory == True:
+            py.delete( objectSelection, ch = True )
+        py.polyTriangulate( objectSelection )
+        print "Successfully intersected"
+        downscaleAmount = finalScale/upscaleAmount
+    else:
+        downscaleAmount = finalScale
+    if superSmooth == True:
+        py.polySmooth( objectSelection, continuity = 0 )
+        py.polySmooth( objectSelection )
+        #py.polyReduce( objectSelection, p = 50, keepQuadsWeight = 0 )
+    
+    py.polyQuad( objectSelection, angle = 180 )
+    py.scale( objectSelection, (downscaleAmount,downscaleAmount,downscaleAmount) )
+    py.move( objectSelection, (objectTranslation.x,objectTranslation.y,objectTranslation.z) )
+    py.rotate( objectSelection, (objectRotation.x,objectRotation.y,objectRotation.z) )
+    
+    newSelections.append( objectSelection )
+py.select( newSelections )
