@@ -1,0 +1,794 @@
+from operator import itemgetter
+import pymel.core as py
+import maya.mel as mel
+import time
+
+        
+#main UI
+class userInterface():
+    
+    windowName = "userInterfaceWin"
+    
+    @classmethod
+    def display(cls):
+        
+        try:
+            py.deleteUI(cls.windowName, window=True)
+        except:
+            pass
+        
+        helpCamList = "Generate a list of all cameras"   
+        helpCamString = "String to search for when generating list of cameras" 
+        helpPreview = "Playback the animation with the current settings"
+        helpSpeed = "Sets a new playback speed, be careful when using low values"
+        helpSmooth = "Determines how smooth to try play the animation"
+        helpShakeSmooth = "Determines the speed, higher values are slower"
+        helpShakeReduction = "Determines the amplitude, higher values are smaller"
+        helpCreateShake = "Apply camera shake to the selection"
+        helpDeleteShake = "Remove camera shake from the selection"
+        helpBypass = "Disable cameras from changing the speed"
+        main_window = py.window(cls.windowName, title="Playback animation", mxb=False, s=False )
+        win_layout1 = py.rowColumnLayout(numberOfColumns=1)
+        py.text(label="Instructions: Load the attribute editor to set options for the selection, this only needs to be done once.<font size='2'><br/>Any selected cameras within the range of the time slider will be used when playing the scene. Middle mouse click for help.</font>", align = "left")
+        py.popupMenu( button = 2 )   
+        py.menuItem( label="Example camera names:" )
+        py.menuItem( label="camera1_m10_50  (play from frame -10 to 50)" )
+        py.menuItem( label="cam_0_50_50  (play at 50% speed)" )
+        py.menuItem( label="cam_0_50_f30s100_f40s25  (start at full speed, slow to 25% speed from frame 30 to 40)" )
+        win_layout = py.rowColumnLayout(numberOfColumns=4)
+        py.text(label='  ')  
+        py.text(label=' ')  
+        py.text(label='      ')  
+        py.text(label=' ')  
+        py.text(label=' ')  
+        py.text( label = "   Open list of available cameras ", align = "left" )
+        py.popupMenu( button = 2 ) 
+        py.menuItem( label=helpCamList )
+        py.text(label=' ')  
+        py.text(label='    Set the attributes for each selected camera  ', align = "left")  
+        py.popupMenu( button = 2 ) 
+        py.menuItem( label=helpCamString )
+        py.text(label=' ')  
+        py.button( label="Select cameras", parent = win_layout, command = py.Callback( userInterface.listCam ))
+        py.popupMenu( button = 2 ) 
+        py.menuItem( label=helpCamList )
+        py.text(label=' ')  
+        cls.camAttributes = py.button( label="Camera Attribute Editor", parent = win_layout, command = py.Callback( cameraList.display ) )
+        py.popupMenu( button = 2 ) 
+        py.menuItem( label=helpCamString )
+        py.text(label=' ')  
+        py.text(label=' ')  
+        py.text(label=' ') 
+        py.text(label=' ') 
+        py.text(label=' ')  
+        py.text(label = "   Preview the animation ", align = "left" )
+        py.popupMenu( button = 2 ) 
+        py.menuItem( label=helpPreview )
+        py.text(label=' ') 
+        py.text(label='Playback speed  ', align = "right") 
+        py.popupMenu( button = 2 ) 
+        py.menuItem( label=helpSpeed )
+        py.text(label=' ')  
+        py.button( label="Play animation", parent = win_layout, command = py.Callback( userInterface.playAnim )) 
+        py.popupMenu( button = 2 ) 
+        py.menuItem( label=helpPreview )
+        py.text(label=' ') 
+        cls.playbackSpeed = py.floatSliderGrp( field = True, parent = win_layout, min = 0.01, max = 2.5, fmn = 0.01, fmx = 100, pre = 2 )
+        cls.playbackSpeed.setValue(1)
+        py.popupMenu( button = 2 ) 
+        py.menuItem( label=helpSpeed )
+        py.text(label=' ')
+        cls.bypassSpeed = py.checkBox(label=' Bypass individual camera speeds') 
+        py.popupMenu( button = 2 ) 
+        py.menuItem( label=helpBypass )
+        py.text(label=' ')  
+        py.text(label='Playback smoothness  ', align = "right") 
+        py.popupMenu( button = 2 ) 
+        py.menuItem( label=helpSmooth )
+        py.text(label=' ')  
+        py.text(label=' ')  
+        py.text(label=' ')  
+        cls.playbackSmooth = py.floatSliderGrp( field = True, parent = win_layout, min = 0.1, max = 5, fmn = 0, fmx = 100, pre = 1)
+        cls.playbackSmooth.setValue(1)
+        py.popupMenu( button = 2 ) 
+        py.menuItem( label=helpSmooth )
+        py.text(label=' ')  
+        py.text(label=' Camera shake smoothness', align = 'left')   
+        py.popupMenu( button = 2 ) 
+        py.menuItem( label=helpSmooth )
+        py.text(label=' ')  
+        py.text(label=' ') 
+        py.text(label=' ') 
+        cls.shakeSpeed = py.floatSliderGrp( field = True, parent = win_layout, min = 1, max = 1000, fmn = 1, fmx = 100000, pre = 0)
+        cls.shakeSpeed.setValue(100)
+        py.popupMenu( button = 2 ) 
+        py.menuItem( label=helpShakeSmooth )
+        py.text(label=' ') 
+        py.button( label="Create camera shake", parent = win_layout, command = py.Callback( userInterface.createShake, True )) 
+        py.popupMenu( button = 2 ) 
+        py.menuItem( label=helpCreateShake )
+        py.text(label=' ')  
+        py.text(label=' Camera shake reduction', align = 'left')  
+        py.popupMenu( button = 2 ) 
+        py.menuItem( label=helpShakeReduction )
+        py.text(label=' ')  
+        py.text(label=' ')  
+        py.text(label=' ')  
+        cls.shakeAmplitude = py.floatSliderGrp( field = True, parent = win_layout, min = 1, max = 2000, fmn = 1, fmx = 100000, pre = 0)
+        cls.shakeAmplitude.setValue(400)
+        py.popupMenu( button = 2 ) 
+        py.menuItem( label=helpShakeReduction )
+        py.text(label=' ')  
+        py.button( label="Delete camera shake", parent = win_layout, command = py.Callback( userInterface.createShake, False )) 
+        py.popupMenu( button = 2 ) 
+        py.menuItem( label=helpDeleteShake )
+        py.showWindow(cls.windowName)
+        
+    @classmethod
+    def createShake(cls,create,num=0):
+        selection = py.ls( selection = True )
+        fail = 0
+        
+        #get camera shape
+        for i in range( len(selection) ):
+            try:
+                cam = selection[i].getShape()
+            except:
+                cam = selection[i]
+                
+            if py.objectType(cam, isType = 'camera'):
+                
+                speed = py.floatSliderGrp(cls.shakeSpeed, query=True, value=True)
+                amplitude = py.floatSliderGrp(cls.shakeAmplitude, query=True, value=True)
+                
+                #delete attributes
+                try:
+                    hzGetAttr = py.getAttr( cam+'.hz' )
+                    vzGetAttr = py.getAttr( cam+'.vz' )
+                    if hzGetAttr != None:
+                        py.delete( hzGetAttr )
+                    if vzGetAttr != None:
+                        py.delete( vzGetAttr )
+                    py.deleteAttr( cam+'.hz' )
+                    py.deleteAttr( cam+'.vz' )
+                    py.setAttr ( cam+'.shakeEnabled', 0 )
+                    py.setAttr ( cam+'.horizontalShake', 0 )
+                    py.setAttr ( cam+'.verticalShake', 0 )
+                
+                #if there is an error in deleting, create all attributes and re-delete
+                except:
+                    if create == False:
+                        tempfail = 0
+                        try:
+                            #add all attributes
+                            py.setAttr ( cam+'.shakeEnabled', 1 )
+                            py.addAttr( cam, shortName = 'hz', longName = 'HorizontalShake', dataType = 'string' )
+                            py.addAttr( cam, shortName = 'vz', longName = 'VerticalShake', dataType = 'string' )
+                            horizontal = py.expression( string = cam+'.horizontalShake=noise((frame+50)/'+str(float(speed/10.0))+')/'+str(float(amplitude))+';' )
+                            vertical = py.expression( string = cam+'.verticalShake=noise((frame)/'+str(float(speed/20.0))+')/'+str(float(amplitude))+';' )
+                            py.setAttr( cam+'.hz', horizontal )
+                            py.setAttr( cam+'.vz', vertical )
+                        except:
+                            pass
+                        try:
+                            #remove attributes
+                            hzGetAttr = py.getAttr( cam+'.hz' )
+                            vzGetAttr = py.getAttr( cam+'.vz' )
+                            if hzGetAttr != None:
+                                py.delete( hzGetAttr )
+                            if vzGetAttr != None:
+                                py.delete( vzGetAttr )
+                            py.deleteAttr( cam+'.hz' )
+                            py.deleteAttr( cam+'.vz' )
+                            py.setAttr ( cam+'.shakeEnabled', 0 )
+                            py.setAttr ( cam+'.horizontalShake', 0 )
+                            py.setAttr ( cam+'.verticalShake', 0 )
+                        except:
+                            fail = 1
+                            
+                if create == True:
+                    #recreate attributes
+                    try:
+                        py.setAttr ( cam+'.shakeEnabled', 1 )
+                        py.addAttr( cam, shortName = 'hz', longName = 'HorizontalShake', dataType = 'string' )
+                        py.addAttr( cam, shortName = 'vz', longName = 'VerticalShake', dataType = 'string' )
+                        horizontal = py.expression( string = cam+'.horizontalShake=noise((frame+50)/'+str(float(speed/10.0))+')/'+str(float(amplitude))+';' )
+                        vertical = py.expression( string = cam+'.verticalShake=noise((frame)/'+str(float(speed/20.0))+')/'+str(float(amplitude))+';' )
+                        py.setAttr( cam+'.hz', horizontal )
+                        py.setAttr( cam+'.vz', vertical )
+                    except:
+                        fail = 2
+                 
+                #if something has gone wrong
+                if fail > 0:
+                    if num == 1:
+                        #print error if 2nd attempt unsuccessful
+                        print
+                        if fail == 1:
+                            print "Unable to delete camera shake in " + str(cam).replace('Shape','') + ", it may already have a custom expression."
+                            print "Please manually remove this first before trying to create a new one."
+                        elif fail == 2:
+                            print "Expression already exists"
+                            
+                    else:
+                        #delete node connected to shake
+                        connections = py.listConnections(cam, c=True)
+                        for i in range(len(connections)):
+                            connection = connections[i][0].split('.')[1]
+                            if connection == 'horizontalShake' or connection == 'verticalShake':
+                                py.delete( connections[i][1] )
+                        
+                        #rerun code
+                        userInterface.createShake(create,1)
+        
+    @classmethod
+    def playAnim(cls):
+        playbackSpeed = py.floatSliderGrp( cls.playbackSpeed, query = True, value = True )
+        playbackSmooth = py.floatSliderGrp( cls.playbackSmooth, query = True, value = True )
+        bypassSpeeds = py.checkBox( cls.bypassSpeed, query = True, value = True )
+        playFullRange(playbackSpeed, playbackSmooth, bypassSpeeds)
+    
+    @classmethod
+    def listCam(cls):
+        winName = listCam().windowName
+        listCam.display()
+
+class cameraList():
+    windowName = "selectedCameras"
+    
+    @classmethod
+    def camAttributes(cls,camInfo,mode):
+        if mode == 'create':
+            camName = camInfo
+            camInfo = cls.getNameInfo([camName])[0]
+            try:
+                py.getAttr( camName+'.sf' )
+            except:
+                py.addAttr( camName, shortName = 'sf', longName = 'StartFrame', dataType = 'string' )
+                py.setAttr( camName+'.sf', camInfo[3] )
+            try:
+                py.getAttr( camName+'.ef' )
+            except:
+                py.addAttr( camName, shortName = 'ef', longName = 'EndFrame', dataType = 'string' )
+                py.setAttr( camName+'.ef', camInfo[4] )
+            try:
+                py.getAttr( camName+'.fspd' )
+            except:
+                py.addAttr( camName, shortName = 'fspd', longName = 'FrameSpeed', dataType = 'string' )
+                py.setAttr( camName+'.fspd', camInfo[2] )
+            try:
+                py.getAttr( camName+'.fcng' ).split(',')
+            except:
+                py.addAttr( camName, shortName = 'fcng', longName = 'FrameChanges', dataType = 'string' )
+                frameChanges = ''
+                for i in range(int(camInfo[5])):
+                    j = (i+3)*2
+                    frameChanges += str(camInfo[j]) + ',' + str(camInfo[j+1]) + ','
+                frameChanges += str(int(camInfo[5]))
+                py.setAttr( camName+'.fcng', frameChanges )
+        
+        if mode == 'update':
+            
+            camName = camInfo[0]
+            speed = camInfo[2]
+            startFrame = camInfo[3].replace('m','-')
+            endFrame = camInfo[4].replace('m','-')
+            frameChanges = ''
+            for i in range(int(camInfo[5])):
+                j = (i+3)*2
+                frameChanges += str(camInfo[j]).replace('m','-') + ',' + str(camInfo[j+1]) + ','
+            frameChanges += str(int(camInfo[5]))
+
+            py.setAttr( camName+'.sf', startFrame )
+            py.setAttr( camName+'.ef', endFrame )
+            py.setAttr( camName+'.fspd', speed )
+            py.setAttr( camName+'.fcng', frameChanges )
+            cls.display()
+        
+        if mode == 'get':
+            camName = camInfo
+            speed = py.getAttr( camName+'.fspd' )
+            startFrame = py.getAttr( camName+'.sf' ).replace('-','m')
+            endFrame = py.getAttr( camName+'.ef' ).replace('-','m')
+            frameChanges = py.getAttr( camName+'.fcng' )
+            
+            frameChangesSeparate = frameChanges.split(',')
+            
+            newName = camName.split('_')[0] + '_' + startFrame + '_' + endFrame + '_' + speed
+            for i in range(int(frameChangesSeparate[-1])*2):
+                
+                if float(i/2) == i/2.0:
+                    newName += '_f'+frameChangesSeparate[i].replace('-','m')
+                else:
+                    newName += 's'+frameChangesSeparate[i]
+            return newName
+            
+            
+    @classmethod
+    def update(cls,camName,i):
+        startFrame = str(py.textField(cls.field[str(i)+'.startFrame'], query=True, text=True)).replace('-','m')
+        endFrame = str(py.textField(cls.field[str(i)+'.endFrame'], query=True, text=True)).replace('-','m')
+        speed = str(py.textField(cls.field[str(i)+'.speed'], query=True, text=True))
+        numChanges = cls.field[str(i)+'.numChanges']+1
+        frameChanges = ''
+        for j in range(numChanges):
+            try:
+                changes = py.textField(cls.field[str(i)+'.change'+str(j)], query=True, text=True).replace('f','').replace('s','').split(':')
+                frameChanges += "'" + str(changes[0]).replace('-','m') + "', '" + str(changes[1]).replace('-','') +"'"
+                if j != numChanges - 1:
+                    frameChanges += ", "
+            except:
+                numChanges -= 1
+        newNameStart = "[camName[0], camName[0].split('_')[0], speed, startFrame, endFrame, str(numChanges),"
+        newNameEnd = "]"
+        newName = eval(newNameStart+frameChanges+newNameEnd)
+        cls.camAttributes( newName,'update' )
+        
+    @classmethod
+    def updateNames(cls, names):
+        for name in names:
+            py.rename( name, cls.camAttributes(name,'get') )
+        cls.display()
+  
+    @classmethod
+    def cleanNames(cls, names):
+        for name in names:
+            newName = str(name.split('_')[0])+"_"+str(name.split('_')[1])+"_"+str(name.split('_')[2])
+            py.rename( name, newName )
+        cls.display()
+    
+    @classmethod
+    def updateCamInfo(cls, i):
+        py.button(cls.field[str(i)+'.buttonupdate'], edit=True, enable=True)
+        py.text(cls.field[str(i)+'.saved'], edit=True, label=' (not saved) ',enable=True)
+
+    @classmethod
+    def display(cls):
+        
+        try:
+            py.deleteUI(cls.windowName, window=True)
+        except:
+            pass
+        
+        maxNameLength = 13
+        
+        #get max length
+        listOfCameras = py.ls( selection = True )
+        for i in range(len(listOfCameras)):
+            cam = listOfCameras[i].replace( '_', ' ' ).split()
+            if 'cam' in str(listOfCameras[i]) and len(cam)>2:
+                if len(str(listOfCameras[i])) > maxNameLength:
+                    maxNameLength = len(str(listOfCameras[i]))
+        
+        for i in range(len(listOfCameras)):
+            cls.camAttributes(listOfCameras[i],'create')
+            
+        allCameras = cls.getNameInfo(py.ls(selection=True))
+        #get stored information
+        storeInfo = []
+        for i in range(len(allCameras)):
+            storeInfo.append( cls.camAttributes(allCameras[i][0],'get') )
+
+        allCamerasNew = cls.getNameInfo(storeInfo)
+            
+        main_window = py.window(cls.windowName, title="Selection Details", mxb=False, s=False )        
+        win_layout1 = py.rowColumnLayout(numberOfColumns=1)
+        py.text(label="Use this page to set the camera attributes. The first run will attempt to read the name for values, but these can be easily changed.<br/>To copy values from one camera to another, generate the name of one, copy it to the new camera, and hit reset to generate the values.<br/><br/>", align = "left")
+
+        win_layout = py.rowColumnLayout(numberOfColumns=8)
+        py.text(label='<strong>Camera Name</strong>',align='left')  
+        py.text(label='<strong>Start Frame</strong>',align='left')  
+        py.text(label='<strong>End Frame</strong>',align='left')  
+        py.text(label='<strong>Overall Speed</strong>',align='left')
+        py.text(label='<strong>Changes</strong>',align='left')
+        py.text(label='<strong>Controls</strong>',align='left')
+        py.text(label=' ',align='left',w=70)
+        py.text(label=' ')
+        py.text(label=' ')
+        py.text(label=' ')
+        py.text(label=' ')
+        py.text(label=' ')
+        py.text(label='frame : speed',align='left' )
+        py.text(label=' ')
+        py.text(label=' ')
+        py.text(label=' ')
+        cls.field = dict()
+        for i in range(len(allCameras)):
+            cls.camName = allCameras[i][0]
+            camNameShort = allCamerasNew[i][1]
+            speed = allCamerasNew[i][2]
+            startFrame = allCamerasNew[i][3].replace('m','-')
+            endFrame = allCamerasNew[i][4].replace('m','-')
+            numChanges = int(allCamerasNew[i][5])
+            cls.field[str(i)+'.camName']=py.text(label='  '+cls.camName,align='left',w=len(cls.camName)*6+10)
+            cls.field[str(i)+'.startFrame']=py.textField(text=startFrame, changeCommand = 'cameraList.updateCamInfo("'+str(i)+'")')
+            cls.field[str(i)+'.endFrame']=py.textField(text=endFrame, changeCommand = 'cameraList.updateCamInfo("'+str(i)+'")')
+            cls.field[str(i)+'.speed']=py.textField(text=speed, changeCommand = 'cameraList.updateCamInfo("'+str(i)+'")')
+            cls.field[str(i)+'.numChanges']=numChanges
+            if numChanges == 0:
+                changes = ""
+            else:
+                changes = str(allCamerasNew[i][6])+":"+str(allCamerasNew[i][7])
+            cls.field[str(i)+'.change0']=py.textField(text=changes, changeCommand = 'cameraList.updateCamInfo("'+str(i)+'")')
+            cls.camNameFormatted = cls.getNameInfo([cls.camName])[0]
+            cls.field[str(i)+'.buttonupdate']=py.button( label = "Update", enable=True, command = py.Callback( cls.update,cls.camNameFormatted,i ) )
+            cls.field[str(i)+'.buttonname']=py.button( label = "Reset", command = py.Callback( cls.camAttributes,cls.camNameFormatted,'update' ) )
+            cls.field[str(i)+'.saved']=py.text(label=' (saved) ',enable=False)
+            for j in range(numChanges):
+                num = (j+4)*2
+                py.text(label='')
+                py.text(label='')
+                py.text(label='')
+                py.text(label='')
+                if j != numChanges - 1:
+                    changes = str(allCamerasNew[i][num]).replace('m','-')+":"+str(allCamerasNew[i][num+1])
+                else:
+                    changes = ''
+                cls.field[str(i)+'.change'+str(j+1)]=py.textField(text=changes, changeCommand = 'cameraList.updateCamInfo("'+str(i)+'")')
+                py.text(label='')
+                py.text(label='')
+                py.text(label='')
+        py.button( label = "Generate Camera Names", command = py.Callback( cls.updateNames,listOfCameras ) )
+        py.button( label = "Clean Camera Names", command = py.Callback( cls.cleanNames,listOfCameras ) )
+        py.button( label = "Refresh Window", command = py.Callback( cameraList.display ) )
+        py.showWindow()
+        
+    @classmethod
+    def getNameInfo(cls,listOfCameras):
+             
+        allCameras = []
+        for i in range( 0, len(listOfCameras) ):
+            cam = listOfCameras[i].replace( '_', ' ' ).split()
+            if 'cam' in cam[0]:
+                fullName = listOfCameras[i]
+                camNameShort = cam[0]
+                if len(cam) <= 2:
+                    if len(cam) == 1:
+                        speed = 100
+                    else:
+                        speed = cam[1]
+                    listValues = "['"+fullName+"','"+camNameShort+"','"+str(speed)+"','"+str(int(py.playbackOptions(minTime=True,query=True)))+"','"+str(int(py.playbackOptions(maxTime=True,query=True)))+"','0']"
+
+                elif len(cam) > 2:
+                    
+                    numChanges = len(cam)-3
+                    if len(cam) == 3:
+                        speed = 100
+                    elif cam[3].replace('f','') == cam[3] and cam[3].replace('s','') == cam[3]:
+                        speed = cam[3]
+                        numChanges -= 1
+                    else:
+                        speed = 100
+                    
+                    startFrame = cam[1]
+                    endFrame = cam[2]
+                    listValues = "['"+listOfCameras[i]+"','"+cam[0]+"','"+str(speed)+"','"+str(startFrame)+"','"+str(endFrame)+"','"+str(numChanges)+"'"
+                    
+                    for i in range(numChanges):
+                        speedChange = cam[i-numChanges].replace('f','').split('s')
+                        frameChange = speedChange[0]
+                        newSpeed = speedChange[1]
+                        listValues += ",'"+str(frameChange)+"','"+str(newSpeed)+"'"
+                    listValues += "]"
+                    
+                listValues = eval(str(listValues))
+                allCameras.append(listValues)
+                
+        return allCameras
+
+#outliner window
+class listCam():
+    
+    windowName = "listAllCameras"
+    
+    @classmethod
+    def display(cls):
+        
+        try:
+            py.windowPref(cls.windowName, remove=True )
+        except:
+            pass
+        try:
+            py.deleteUI(cls.windowName, window=True)
+        except:
+            pass
+            
+        outlinerFilter = py.itemFilter(byName = '*cam*')
+        
+        #count cameras
+        ignore = ['Shape','translate','rotate','scale','visibility']
+        allObjects = py.ls()
+        numberOfCameras = 0
+        camList = []
+        for i in range( len(allObjects) ):
+            if 'cam' in str(allObjects[i]):
+                invalid = 0
+                for ignoreName in ignore:
+                    if ignoreName in str(allObjects[i]):
+                        invalid += 1
+                if invalid == 0:
+                    numberOfCameras += 1
+                    camList.append(allObjects[i])
+                    
+        maxLength = 0
+        for cameras in camList:
+            if len(str(cameras)) > maxLength:
+                maxLength = len(str(cameras))
+        
+        
+        if numberOfCameras < 1:
+            numberOfCameras == 1
+        if maxLength < 10:
+            maxLength == 10
+            
+        #display window
+        winCameras = py.window(cls.windowName, title="Available cameras")
+        height = (15/numberOfCameras) + 75 + (25 * numberOfCameras) ** 0.975
+        if height > 600:
+            height = 600
+        width = (maxLength*7)**0.975+125
+        if width > 700:
+            width = 700
+        py.frameLayout( labelVisible=False, h = height, w=width )
+        panel = py.outlinerPanel()
+        outliner = py.outlinerPanel(panel, query=True,outlinerEditor=True)
+        py.outlinerEditor( outliner, edit=True, showShapes=False, showAttributes=False, showConnected=False, showDagOnly=True, ignoreDagHierarchy=False, displayMode = 'List', filter = outlinerFilter )
+        py.showWindow()
+
+def currentFPS():
+    default = 24
+    unit = py.currentUnit( time=True, query = True )
+    if unit == "game":
+        fps = 15
+    elif unit == "film":
+        fps = 24
+    elif unit == "pal":
+        fps = 25
+    elif unit == "ntsc":
+        fps = 30
+    elif unit == "show":
+        fps = 48
+    elif unit == "palf":
+        fps = 50
+    elif unit == "ntscf":
+        fps = 60
+    elif unit == "sec" or unit == "millisec" or unit == "min":
+        fps = default
+    else:
+        try:
+            fps = int(unit.replace('fps',''))
+        except:
+            fps = default
+    return fps
+
+
+#play from camera
+def playbackCamera(selection, start, end, playbackSpeed, smoothness, bypassSpeeds):
+    speedChanges = int(selection[4].split(',')[-1])
+    startFrame = int(selection[1])
+    endFrame = int(selection[2])
+    camSpeed = int(selection[3])/100.0
+    if bypassSpeeds == True:
+        speedChanges = 0
+        camSpeed = 1.0
+    overallSpeed = playbackSpeed * camSpeed
+    
+    speedValues = []
+    
+    for i in range(speedChanges):
+       num = i*2
+       speedValues.append([selection[4].split(',')[num],int(float(selection[4].split(',')[num+1])*overallSpeed)])
+           
+    #check names are valid
+    if 'cam' in selection[0] and len(selection) > 3:
+        incrementCount = 0
+        if startFrame >= end or endFrame <= start:
+            print selection[0]+ " not in playback range"
+        else:
+            if startFrame < start:
+                startFrame = int(start)
+            if endFrame > end:
+                endFrame = int(end)
+                
+            #sort list
+            if len(speedValues) > 0:
+                
+                #count if all are higher than start frame
+                addStartSpeed = 0
+                addEndSpeed = 0
+                for i in range( len(speedValues) ):
+                    if int(startFrame) < int(speedValues[i][0]):
+                        addStartSpeed += 1
+                    if int(endFrame) > int(speedValues[i][0]):
+                        addEndSpeed += 1
+                    
+                lowValue = speedValues[0]
+                originalLength = len(speedValues)
+                if addStartSpeed == originalLength:
+                    for i in range(len(speedValues)):
+                        if int(speedValues[i][0]) < int(lowValue[0]):
+                            lowValue = speedValues[i]
+                    speedValues.append([startFrame,lowValue[1]])
+                    speedChanges += 1
+                    
+                highValue = speedValues[0]
+                if addEndSpeed == originalLength:
+                    for i in range(len(speedValues)):
+                        if int(speedValues[i][0]) > int(highValue[0]):
+                            highValue = speedValues[i]
+                    speedValues.append([endFrame,highValue[1]])
+                    speedChanges += 1
+            
+            else:
+                speedValues.append([startFrame,int(overallSpeed*100)])
+                speedValues.append([endFrame,int(overallSpeed*100)])
+                speedChanges += 2
+               
+                  
+            #sort list
+            speedValuesNew = '['
+            for i in range( len(speedValues) ):
+                brackets = "("+str(speedValues[i][0])+", "+str(speedValues[i][1])+")"
+                if i != len(speedValues)-1:
+                    brackets += ', '
+                else:
+                    brackets += ']'
+                speedValuesNew += str(brackets)
+            speedValues = sorted( eval(speedValuesNew), key=itemgetter(0) )
+            
+            py.currentTime( startFrame )
+            frameSpeed = 1.0/currentFPS()
+            for j in range(speedChanges):
+                #get individual speed values
+                if len(speedValues) > 0:
+                    if j != 0:
+                        camStartNew = speedValues[j][0]
+                    else:
+                        camStartNew = startFrame
+                    try:
+                        camEndNew = speedValues[j+1][0]
+                    except:
+                        camEndNew = endFrame
+                    speed = speedValues[j][1]/100.0
+                    try:
+                        newSpeed = speedValues[j+1][1]/100.0
+                    except:
+                        newSpeed = speed
+                else:
+                    camStartNew = startFrame
+                    camEndNew = endFrame
+                    newSpeed = speed
+                
+                #set variables
+                frameRange = camEndNew - camStartNew
+                camSpeed = float( overallSpeed * speed )
+                frameRangeNew = (frameRange / camSpeed) * smoothness
+                
+                if frameRangeNew > 0:
+                    
+                    #display info
+                    extraInfo = " ("
+                    if frameRangeNew == 1:
+                        extraInfo += "frame"+str(int(camStartNew))+")"
+                    else:
+                        extraInfo += "frames "+str(int(camStartNew))+" to "+str(int(camEndNew))+")"
+                    extraInfo += " at " + str(int(speed*100)) + "% speed"
+                    print "Playing "+str(int(frameRangeNew))+" frames from "+str(selection[0])+extraInfo
+                    
+                    #set variables
+                    speedChange = newSpeed - speed
+                    speedIncrement = speedChange/frameRangeNew
+                    py.lookThru( selection[0] )
+                    predictedTime = 0
+                    increment = 1
+                    startingTime = time.time()
+                    
+                    #play animation
+                    for frame in range( int(frameRangeNew) ):
+                        newTime = time.time()
+                        
+                        #new predicted time calculation
+                        countdown = float(frame)/frameRangeNew
+                        camPercentage = speed - ((speed-newSpeed) * frame/float(frameRangeNew))
+                        timeTaken = (0.04/camPercentage)/smoothness
+                        
+                        '''predictedTime = (frame * frameSpeed)/smoothness'''
+                        
+                        #skip frame if not updating fast enough
+                        if predictedTime < newTime - startingTime:
+                            increment += 1
+                            incrementCount += 1
+                        #update frame and wait
+                        else:
+                            increaseAmount = camSpeed + speedIncrement * frame
+                            py.currentTime( float( py.currentTime( query = True )) + increment*(increaseAmount/smoothness), edit = True )
+                            executeSpeed = time.time() - newTime
+                            sleepTime = frameSpeed/smoothness - executeSpeed
+                            increment = 1
+                            if sleepTime > 0:
+                                time.sleep( float(sleepTime) )
+                                
+                        predictedTime += timeTaken
+                
+    else:
+        cmd.select( '' + selection[0] + '', deselect = True )
+        print str(selection[0]) + " does not fit the default camera name, deselecting"
+        
+    incrementCount = 0
+    return incrementCount
+
+#main code
+def playFullRange(playbackSpeed, playbackSmooth, bypassSpeeds):
+    
+    #get variables
+    userCam = py.lookThru( query = True )
+    current = py.currentTime( query = True )
+    start = py.playbackOptions( minTime = True, query = True )
+    end = py.playbackOptions( maxTime = True, query = True )
+    resetPlayback = False
+    if py.playbackOptions( ps = True, query = True ) == 0:
+        py.playbackOptions( ps = playbackSpeed )
+        resetPlayback = True
+    selection = py.ls(selection = True)
+    incrementCount = 0
+    
+    allCameras = []
+    for item in selection:
+        storedValues = prepareAnimation(item)
+        if storedValues != 'invalid':
+            camName = storedValues[0]
+            startFrame = storedValues[1]
+            endFrame = storedValues[2]
+            camSpeed = storedValues[3]
+            frameUpdates = storedValues[4]
+            listValues = "['"+camName+"','"+startFrame+"','"+endFrame+"','"+camSpeed+"','"+frameUpdates+"']"
+            listValues = eval(listValues)
+            allCameras.append(listValues)
+    
+    allCamerasNew = '['
+    if len(allCameras) > 0:
+        for i in range( len(allCameras) ):
+            brackets = "('"+str(allCameras[i][0])+"', "+str(allCameras[i][1])+", "+str(allCameras[i][2])+", "+str(allCameras[i][3])+", '"+str(allCameras[i][4])+"')"
+            if i != len(allCameras)-1:
+                brackets += ', '
+            else:
+                brackets += ']'
+            allCamerasNew += str(brackets)
+    else:
+        allCamerasNew += ']'
+        print selection[0] + " cannot play. Please load the attribute editor first to set values."
+    allCamerasNew = sorted( eval(allCamerasNew), key=itemgetter(1) )
+    allCameras = []
+    for i in range( len(allCamerasNew) ):
+        allCameras.append( str(allCamerasNew[i]).replace(')','').replace('(','').replace("'",'').split(', ') )
+        
+    #play animation
+    for i in range( 0, len(allCameras) ):
+        try:
+            incrementCount += playbackCamera(allCameras[i], start, end, playbackSpeed, float(playbackSmooth), bypassSpeeds)
+        except:
+            print selection[0] + " has a problem with playback. Please make sure the settings are valid."
+        
+    if incrementCount == 1:
+        print str(incrementCount) + " frame skipped"
+    elif incrementCount > 1:
+        print str(incrementCount) + " frames skipped"
+                
+    #reset values
+    if resetPlayback == True:
+        py.playbackOptions( ps = 0 )
+    py.lookThru( userCam )
+    py.currentTime( current )
+
+def prepareAnimation(cam):
+    try:
+        startFrame = py.getAttr( cam+'.sf' )
+        endFrame = py.getAttr( cam+'.ef' )
+        speed = py.getAttr( cam+'.fspd' )
+        frameChanges = py.getAttr( cam+'.fcng' )
+        grouped = [cam,startFrame,endFrame,speed,frameChanges]
+    except:
+        grouped = "invalid"
+    return grouped
+    
+userInterface.display()
