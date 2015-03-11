@@ -20,10 +20,11 @@ def editDictionary( dictionaryName, listOfValues, canOverwriteKeys=True ):
             print "Something went wrong"
             return
         reducedDictionary = reducedDictionary[i]
-        
-    emptyValue = reducedDictionary.get( listOfValues[-2], None )
-    if canOverwriteKeys or ( not canOverwriteKeys and not emptyValue ):
+    if canOverwriteKeys or ( not canOverwriteKeys and not reducedDictionary.get( listOfValues[-2], None ) ):
         reducedDictionary[listOfValues[-2]] = listOfValues[-1]
+        return True
+    else:
+        return False
         
 class roundToMultiple:
     def __init__( self, multiple, *args ):
@@ -58,13 +59,14 @@ minRange = roundToMultiple( 8, xMin, yMin ).down()
 maxRange = roundToMultiple( 8, xMax, yMax ).up()
 mainDepthLevel = max( [abs( i ) for i in minRange+maxRange] )
 mainDepthLevel = int( math.log( mainDepthLevel/2, 2 ) )
-
+minDepthLevel = -2 #0 has accuracy of 1, -1 of 0.5 etc
 
 #Start octree dictionary
 octreeStructure = [( 1, 1 ), ( 1, -1 ), ( -1, 1 ), ( -1, -1 )]
 octreeDepthName = "Depth"
 octreeDataName = "Data"
 octreeData = {"Depth":mainDepthLevel, "Data": dict.fromkeys( octreeStructure, False )}
+
 
 #originalCoordinates = dict.fromkeys( [tuple( x+0.5 for x in i ) for i in grid.keys()] )
 originalCoordinates = dict.fromkeys( grid.keys() )
@@ -73,8 +75,8 @@ for relativeCoordinate in originalCoordinates.keys():
     for key in multiplierList:
         maxMultiplier = ( mainDepthLevel-1 )*4
         totalMultiplier = 0
-        while maxMultiplier > 0:
-            
+        while maxMultiplier > pow( 2, minDepthLevel )*0.9:
+            currentDepthIteration += 1
             #Detect if it should be positive or negative
             currentMultiplier = maxMultiplier
             
@@ -85,7 +87,7 @@ for relativeCoordinate in originalCoordinates.keys():
                 currentMultiplier *= -1
             #Append to total
             totalMultiplier += currentMultiplier
-            maxMultiplier /= 2
+            maxMultiplier /= 2.0
             
     originalCoordinates[relativeCoordinate] = multiplierList
 
@@ -102,11 +104,11 @@ for relativeCoordinate in originalCoordinates:
     dictionaryFix[1::2] = relativeCoordinates
     dictionaryFix.append( 1 )
     editDictionary( octreeData, dictionaryFix )
-   
 
     #Fill empty values with False
     currentDepth = 0
-    while currentDepth < octreeData["Depth"]:
+    maxDepth = octreeData["Depth"]-minDepthLevel
+    while currentDepth < maxDepth:
         depthDictionaryPath = dictionaryFix[:-1]
         currentDictionaryDepth = reduce( dict.__getitem__, depthDictionaryPath[:-1-currentDepth*2], octreeData )
         for i in octreeStructure:
@@ -114,5 +116,5 @@ for relativeCoordinate in originalCoordinates:
                 currentDictionaryDepth[i] = False
                 editDictionary( octreeData, depthDictionaryPath[:-1-currentDepth*2]+[i, False], False )
         #Fill in depth
-        editDictionary( octreeData, depthDictionaryPath[:-2-currentDepth*2]+["Depth", currentDepth], False )
+        editDictionary( octreeData, depthDictionaryPath[:-2-currentDepth*2]+["Depth", currentDepth+minDepthLevel], False )
         currentDepth += 1
