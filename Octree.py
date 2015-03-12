@@ -150,19 +150,20 @@ for relativeCoordinate in originalCoordinates:
 
 
 #Calculate placement of cubes
-def drawCubes( dictionaryValue, minDepthLevel=0, startingCoordinates=[0, 0, 0] ):
+def drawCubes( dictionaryValue, minDepthLevel, startingCoordinates=[0, 0, 0] ):
     allPoints = []
     currentDepth = dictionaryValue["Depth"]
     depthMultiplier = pow( 2, currentDepth )
     #Amount to add to the movement of a cube
-    depthIncrement = minDepthLevel+1
     if minDepthLevel > 0:
         addAmount = 1-pow( 2, ( minDepthLevel-1 ) )
     else:
+        depthIncrement = minDepthLevel+1
         addAmount = pow( 2, minDepthLevel )/2.0 
         while depthIncrement < 0:
             addAmount += pow( 2, depthIncrement )/2.0
             depthIncrement += 1
+    differenceInDepth = currentDepth-minDepthLevel
     for key in dictionaryValue["Data"].keys():
         newCoordinate = [depthMultiplier*i for i in key]
         newCoordinate[0] += startingCoordinates[0]
@@ -177,6 +178,12 @@ def drawCubes( dictionaryValue, minDepthLevel=0, startingCoordinates=[0, 0, 0] )
             #Increment move amount if conditions are met
             if ( currentDepth and minDepthLevel >= 0 ) or ( currentDepth <= 0 and minDepthLevel < 0 ):
                 moveCubeAmount = addAmount
+            
+            #Fix for strange behaviour when minDepthLevel = -1
+            elif differenceInDepth > 0:
+                moveCubeAmount = 1
+                if differenceInDepth > 1:
+                    moveCubeAmount -= 0.25
                     
             py.move( newCube, [(i-1)/2+moveCubeAmount for i in newCoordinate] )
             allPoints.append( [[(i-1)/2+moveCubeAmount for i in newCoordinate],cubeSize] )
@@ -185,7 +192,6 @@ def drawCubes( dictionaryValue, minDepthLevel=0, startingCoordinates=[0, 0, 0] )
         elif type( newDictionaryValue ) == dict:
             allPoints += drawCubes( newDictionaryValue, minDepthLevel, newCoordinate )
     return allPoints
-
 
 
 #Use test value for a bigger cube
