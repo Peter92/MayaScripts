@@ -46,6 +46,7 @@ maxNum = 30
 minNum = 0
 exponentialNum = 0.5
 grid = {}
+
 for i in range( 400 ):
     x = int(random.randint(minNum,maxNum)**exponentialNum)
     y = int(random.randint(minNum,maxNum)**exponentialNum)
@@ -150,14 +151,18 @@ for relativeCoordinate in originalCoordinates:
 
 #Calculate placement of cubes
 def drawCubes( dictionaryValue, minDepthLevel=0, startingCoordinates=[0, 0, 0] ):
+    allPoints = []
     currentDepth = dictionaryValue["Depth"]
     depthMultiplier = pow( 2, currentDepth )
     #Amount to add to the movement of a cube
     depthIncrement = minDepthLevel+1
-    addAmount = pow( 2, minDepthLevel )/2.0
-    while depthIncrement < 0:
-        addAmount += pow( 2, depthIncrement )/2.0
-        depthIncrement += 1
+    if minDepthLevel > 0:
+        addAmount = 1-pow( 2, ( minDepthLevel-1 ) )
+    else:
+        addAmount = pow( 2, minDepthLevel )/2.0 
+        while depthIncrement < 0:
+            addAmount += pow( 2, depthIncrement )/2.0
+            depthIncrement += 1
     for key in dictionaryValue["Data"].keys():
         newCoordinate = [depthMultiplier*i for i in key]
         newCoordinate[0] += startingCoordinates[0]
@@ -172,11 +177,14 @@ def drawCubes( dictionaryValue, minDepthLevel=0, startingCoordinates=[0, 0, 0] )
             #Increment move amount if conditions are met
             if ( currentDepth and minDepthLevel >= 0 ) or ( currentDepth <= 0 and minDepthLevel < 0 ):
                 moveCubeAmount = addAmount
+                    
             py.move( newCube, [(i-1)/2+moveCubeAmount for i in newCoordinate] )
+            allPoints.append( [[(i-1)/2+moveCubeAmount for i in newCoordinate],cubeSize] )
             py.addAttr( newCube, shortName = 'id', longName = "blockID", attributeType = "byte" )
             py.setAttr( "{0}.id".format( newCube ), newDictionaryValue )
         elif type( newDictionaryValue ) == dict:
-            drawCubes( newDictionaryValue, minDepthLevel, newCoordinate )
+            allPoints += drawCubes( newDictionaryValue, minDepthLevel, newCoordinate )
+    return allPoints
 
 
 
