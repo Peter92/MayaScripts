@@ -40,40 +40,28 @@ def roundToMultiple( multiple, *args ):
             maxPower = closestPower
     return maxPower
 
+
+import random
+maxNum = 30
+minNum = 0
+exponentialNum = 0.5
 grid = {}
-grid[(0,0,0)] = 1
-grid[(0,0,1)] = 1
-grid[(1,0,0)] = 1
-grid[(1,0,1)] = 1
-grid[(0,1,0)] = 1
-grid[(0,1,1)] = 1
-grid[(1,1,0)] = 1
-grid[(1,1,1)] = 1
-grid[(3,0,-1)] = 1
-grid[(10,0,-3)] = 1
-
-
-grid[(2,1,1)] = 1
-grid[(2,1,0)] = 1
-grid[(2,0,1)] = 1
-grid[(2,0,0)] = 1
-grid[(3,1,1)] = 1
-grid[(3,1,0)] = 1
-grid[(3,0,1)] = 1
-grid[(3,0,0)] = 5 #To demonstrate blocks not grouping if different ID
-
-for i1 in range( 7 ):
-    for j1 in range( 4 ):
-        for k1 in range( 4 ):
-            grid[(i1+8, j1, k1)] = 1
+for i in range( 400 ):
+    x = int(random.randint(minNum,maxNum)**exponentialNum)
+    y = int(random.randint(minNum,maxNum)**exponentialNum)
+    z = int(random.randint(minNum,maxNum)**exponentialNum)
+    grid[(x,y,z)] = 1
+    
+minDepthLevel = 0
 
 #Convert to new format that gets rid of even values
-def convertCoordinates( dictionaryName ):
+def convertCoordinates( dictionaryName, minDepthLevel=0 ):
     newDictionary = {}
+    addAmount = pow( 2, minDepthLevel )
     for coordinate in dictionaryName.keys():
-        newDictionary[tuple( i*2+1 for i in coordinate )] = dictionaryName[coordinate]
+        newDictionary[tuple( i*2+addAmount for i in coordinate )] = dictionaryName[coordinate]
     return newDictionary
-grid = convertCoordinates( grid )
+grid = convertCoordinates( grid, minDepthLevel )
 
 #Get maximum depth level
 xMax = max( grid.keys(), key=itemgetter( 0 ) )[0]
@@ -82,7 +70,6 @@ yMax = max( grid.keys(), key=itemgetter( 1 ) )[1]
 yMin = min( grid.keys(), key=itemgetter( 1 ) )[1]
 zMax = max( grid.keys(), key=itemgetter( 2 ) )[2]
 zMin = min( grid.keys(), key=itemgetter( 2 ) )[2]
-minDepthLevel = 0
 maxDepthLevel = roundToMultiple( 2, xMax, xMin, yMax, yMin, zMax, zMin )
 
 #Start octree dictionary
@@ -102,8 +89,6 @@ for absoluteCoordinate in originalCoordinates.keys():
     #Find the path down the depth levels
     multiplierList = {0: [], 1: [], 2: []}
     for key in multiplierList.keys():
-        if key == (1,1,1):
-            print 3
         maxMultiplier = pow( 2, maxDepthLevel )
         totalMultiplier = 0
         while maxMultiplier > pow( 2, minDepthLevel )*0.9:
@@ -123,7 +108,6 @@ for absoluteCoordinate in originalCoordinates.keys():
             
     originalCoordinates[absoluteCoordinate] = multiplierList
     
-print originalCoordinates[(1,1,1)]
 #Write into dictionary
 for relativeCoordinate in originalCoordinates:
     
@@ -165,9 +149,15 @@ for relativeCoordinate in originalCoordinates:
 
 
 #Calculate placement of cubes
-def drawCubes( dictionaryValue, startingCoordinates=[0, 0, 0] ):
+def drawCubes( dictionaryValue, minDepthLevel=0, startingCoordinates=[0, 0, 0] ):
     currentDepth = dictionaryValue["Depth"]
     depthMultiplier = pow( 2, currentDepth )
+    #Amount to add to the movement of a cube
+    depthIncrement = minDepthLevel+1
+    addAmount = pow( 2, minDepthLevel )/2.0
+    while depthIncrement < 0:
+        addAmount += pow( 2, depthIncrement )/2.0
+        depthIncrement += 1
     for key in dictionaryValue["Data"].keys():
         newCoordinate = [depthMultiplier*i for i in key]
         newCoordinate[0] += startingCoordinates[0]
@@ -178,16 +168,18 @@ def drawCubes( dictionaryValue, startingCoordinates=[0, 0, 0] ):
         if newDictionaryValue and str( newDictionaryValue ).isdigit():
             cubeSize = 2**currentDepth
             newCube = py.polyCube( h=cubeSize, w=cubeSize, d=cubeSize )[0]
-            if currentDepth:
-                addAmount = 0.5
-            else:
-                addAmount = 0
-            py.move( newCube, [(i-1)/2+addAmount for i in newCoordinate] )
+            moveCubeAmount = 0
+            #Increment move amount if conditions are met
+            if ( currentDepth and minDepthLevel >= 0 ) or ( currentDepth <= 0 and minDepthLevel < 0 ):
+                moveCubeAmount = addAmount
+            py.move( newCube, [(i-1)/2+moveCubeAmount for i in newCoordinate] )
             py.addAttr( newCube, shortName = 'id', longName = "blockID", attributeType = "byte" )
             py.setAttr( "{0}.id".format( newCube ), newDictionaryValue )
         elif type( newDictionaryValue ) == dict:
-            drawCubes( newDictionaryValue, newCoordinate )
+            drawCubes( newDictionaryValue, minDepthLevel, newCoordinate )
+
+
 
 #Use test value for a bigger cube
 #editDictionary( octreeData, ["Data",(-1,-1,-1),1] )
-drawCubes( octreeData )
+drawCubes( octreeData, minDepthLevel )
