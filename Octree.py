@@ -1,4 +1,4 @@
-import pymel.core as py
+import pymel.core as pm
 import math
 from operator import itemgetter
 class EditError( Exception ):
@@ -39,38 +39,52 @@ def roundToMultiple( multiple, *args ):
         if closestPower > maxPower:
             maxPower = closestPower
     return maxPower
-
-
-import random
-maxNum = 30
-minNum = 0
-exponentialNum = 0.5
-grid = {}
-
-for i in range( 400 ):
-    x = int(random.randint(minNum,maxNum)**exponentialNum)
-    y = int(random.randint(minNum,maxNum)**exponentialNum)
-    z = int(random.randint(minNum,maxNum)**exponentialNum)
-    grid[(x,y,z)] = 1
     
+    
+import time
+st = time.time()
+grid = {}
+grid[(0,0,0)] = 1
+grid[(0,0,1)] = 1
+grid[(1,0,0)] = 1
+grid[(1,0,1)] = 1
+grid[(0,1,0)] = 1
+grid[(0,1,1)] = 1
+grid[(1,1,0)] = 1
+grid[(1,1,1)] = 1
+grid[(3,0,-1)] = 1
+grid[(10,0,-3)] = 1
+
+grid[(2,1,1)] = 1
+grid[(2,1,0)] = 1
+grid[(2,0,1)] = 1
+grid[(2,0,0)] = 1
+grid[(3,1,1)] = 1
+grid[(3,1,0)] = 1
+grid[(3,0,1)] = 1
+grid[(3,0,0)] = 5 #To demonstrate blocks not grouping if different ID
+
 minDepthLevel = 0
+
 
 #Convert to new format that gets rid of even values
 def convertCoordinates( dictionaryName, minDepthLevel=0 ):
     newDictionary = {}
     addAmount = pow( 2, minDepthLevel )
     for coordinate in dictionaryName.keys():
-        newDictionary[tuple( i*2+addAmount for i in coordinate )] = dictionaryName[coordinate]
+        newDictionary[tuple( i*2+addAmount*(-1 if i<0 else 1) for i in coordinate )] = dictionaryName[coordinate]
     return newDictionary
-grid = convertCoordinates( grid, minDepthLevel )
+    
+#grid = cPickle.loads(zlib.decompress(base64.b64decode(urllib.urlopen("http://pastee.co/OQ5POF/raw").read()))); minDepthLevel = 0
+calculatedGrid = convertCoordinates( grid, minDepthLevel )
 
 #Get maximum depth level
-xMax = max( grid.keys(), key=itemgetter( 0 ) )[0]
-xMin = min( grid.keys(), key=itemgetter( 0 ) )[0]
-yMax = max( grid.keys(), key=itemgetter( 1 ) )[1]
-yMin = min( grid.keys(), key=itemgetter( 1 ) )[1]
-zMax = max( grid.keys(), key=itemgetter( 2 ) )[2]
-zMin = min( grid.keys(), key=itemgetter( 2 ) )[2]
+xMax = max( calculatedGrid.keys(), key=itemgetter( 0 ) )[0]
+xMin = min( calculatedGrid.keys(), key=itemgetter( 0 ) )[0]
+yMax = max( calculatedGrid.keys(), key=itemgetter( 1 ) )[1]
+yMin = min( calculatedGrid.keys(), key=itemgetter( 1 ) )[1]
+zMax = max( calculatedGrid.keys(), key=itemgetter( 2 ) )[2]
+zMin = min( calculatedGrid.keys(), key=itemgetter( 2 ) )[2]
 maxDepthLevel = roundToMultiple( 2, xMax, xMin, yMax, yMin, zMax, zMin )
 
 #Start octree dictionary
@@ -85,7 +99,7 @@ octreeDataName = "Data"
 octreeData = {"Depth":maxDepthLevel, "Data": dict.fromkeys( octreeStructure, False )}
 
 
-originalCoordinates = dict.fromkeys( grid.keys() )
+originalCoordinates = dict.fromkeys( calculatedGrid.keys() )
 for absoluteCoordinate in originalCoordinates.keys():
     #Find the path down the depth levels
     multiplierList = {0: [], 1: [], 2: []}
@@ -119,7 +133,7 @@ for relativeCoordinate in originalCoordinates:
     #Fill with True
     dictionaryFix = [("Data")]*( len( relativeCoordinates )*2 )
     dictionaryFix[1::2] = relativeCoordinates
-    dictionaryFix.append( grid[relativeCoordinate] )
+    dictionaryFix.append( calculatedGrid[relativeCoordinate] )
     editDictionary( octreeData, dictionaryFix )
     
     #Fill empty values with False
@@ -149,12 +163,12 @@ for relativeCoordinate in originalCoordinates:
             break
 
 
-#Calculate placement of cubes
-def drawCubes( dictionaryValue, minDepthLevel, startingCoordinates=[0, 0, 0] ):
-    allPoints = []
+#Calculate points
+def formatOctree( dictionaryValue, minDepthLevel, startingCoordinates=[0, 0, 0] ):
+    allPoints = {}
     currentDepth = dictionaryValue["Depth"]
     depthMultiplier = pow( 2, currentDepth )
-    #Amount to add to the movement of a cube
+    #Amount to add to the position
     if minDepthLevel > 0:
         addAmount = 1-pow( 2, ( minDepthLevel-1 ) )
     else:
@@ -169,31 +183,45 @@ def drawCubes( dictionaryValue, minDepthLevel, startingCoordinates=[0, 0, 0] ):
         newCoordinate[0] += startingCoordinates[0]
         newCoordinate[1] += startingCoordinates[1]
         newCoordinate[2] += startingCoordinates[2]
-        #newCoordinate = [x+y+z for x, y, z in zip( newCoordinate, startingCoordinates )]
         newDictionaryValue = dictionaryValue["Data"][key]
+        
         if newDictionaryValue and str( newDictionaryValue ).isdigit():
             cubeSize = 2**currentDepth
-            newCube = py.polyCube( h=cubeSize, w=cubeSize, d=cubeSize )[0]
-            moveCubeAmount = 0
-            #Increment move amount if conditions are met
+            #Increment position if conditions are met
             if ( currentDepth and minDepthLevel >= 0 ) or ( currentDepth <= 0 and minDepthLevel < 0 ):
                 moveCubeAmount = addAmount
-            
             #Fix for strange behaviour when minDepthLevel = -1
             elif differenceInDepth > 0:
                 moveCubeAmount = 1
+                #Fix for stranger behaviour when minDepthLevel = -1 and it's a big generation
                 if differenceInDepth > 1:
                     moveCubeAmount -= 0.25
-                    
-            py.move( newCube, [(i-1)/2+moveCubeAmount for i in newCoordinate] )
-            allPoints.append( [[(i-1)/2+moveCubeAmount for i in newCoordinate],cubeSize] )
-            py.addAttr( newCube, shortName = 'id', longName = "blockID", attributeType = "byte" )
-            py.setAttr( "{0}.id".format( newCube ), newDictionaryValue )
+            else:
+                moveCubeAmount = 0
+            
+            totalMovement = tuple( ( i+(1 if i<0 else -1) )/2+moveCubeAmount for i in newCoordinate )
+            allPoints[totalMovement] = [cubeSize, newDictionaryValue]
         elif type( newDictionaryValue ) == dict:
-            allPoints += drawCubes( newDictionaryValue, minDepthLevel, newCoordinate )
+            allPoints.update( formatOctree( newDictionaryValue, minDepthLevel, newCoordinate ) )
     return allPoints
 
+newList = formatOctree( octreeData, minDepthLevel )
 
-#Use test value for a bigger cube
-#editDictionary( octreeData, ["Data",(-1,-1,-1),1] )
-drawCubes( octreeData, minDepthLevel )
+import zlib, base64, cPickle
+inputLength = len( cPickle.dumps( grid ) )
+octreeLength = len( cPickle.dumps( octreeData ) )
+print "Length of input:  {0}".format( inputLength )
+print "Length of octree: {0}".format( octreeLength )
+print "{0}% efficiency".format( round( float( inputLength )/octreeLength, 2 )*100 )
+print "Length of output:  {0}".format( len( cPickle.dumps( newList ) ) )
+
+print time.time()-st
+
+
+for coordinates in newList.keys():
+    cubeSize = newList[coordinates][0]
+    blockID = newList[coordinates][1]
+    newCube = pm.polyCube( h=cubeSize, w=cubeSize, d=cubeSize )[0]
+    pm.move( newCube, coordinates )
+    pm.addAttr( newCube, shortName = 'id', longName = "blockID", attributeType = "byte" )
+    pm.setAttr( "{0}.id".format( newCube ), blockID )
