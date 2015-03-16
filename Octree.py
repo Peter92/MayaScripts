@@ -1,3 +1,15 @@
+"""
+Info
+ - Max depth level is fixed
+ - Min depth level doesn't matter, just determins the voxel size
+ - Maximum coordinates are +-(2^depth-1)
+ - Set ID to 0 to remove block, dictionary will automatically clean
+ 
+ - Find ID before editing dictionary, if leaf needs to be made, fill all blocks with same ID
+"""
+from pprint import PrettyPrinter
+pp = PrettyPrinter().pprint
+
 import pymel.core as pm
 import math
 from operator import itemgetter
@@ -39,10 +51,7 @@ def roundToMultiple( multiple, *args ):
         if closestPower > maxPower:
             maxPower = closestPower
     return maxPower
-    
-    
-import time
-st = time.time()
+#pp().pprint(octreeData)
 grid = {}
 grid[(0,0,0)] = 1
 grid[(0,0,1)] = 1
@@ -53,7 +62,7 @@ grid[(0,1,1)] = 1
 grid[(1,1,0)] = 1
 grid[(1,1,1)] = 1
 grid[(3,0,-1)] = 1
-grid[(10,0,-3)] = 1
+grid[(10,0,-3)] = [1,2]
 
 grid[(2,1,1)] = 1
 grid[(2,1,0)] = 1
@@ -64,18 +73,36 @@ grid[(3,1,0)] = 1
 grid[(3,0,1)] = 1
 grid[(3,0,0)] = 5 #To demonstrate blocks not grouping if different ID
 
+grid = {}
+grid[(1,0,0)] = 2
+grid[(0,0,1)] = [1,4]
+grid[(2,0,0)] = 2
+
 minDepthLevel = 0
 
+import time
+st = time.time()
 
+#Get min depth level if it exists
+def getMinDepth( minDepthLevel, blockInfo ):
+    try:
+        return int( blockInfo[1] )
+    except:
+        return minDepthLevel
+        
 #Convert to new format that gets rid of even values
 def convertCoordinates( dictionaryName, minDepthLevel=0 ):
     newDictionary = {}
-    addAmount = pow( 2, minDepthLevel )
     for coordinate in dictionaryName.keys():
+        
+        minDepthLevel = getMinDepth( minDepthLevel, dictionaryName[coordinate] )
+        
+        addAmount = pow( 2, minDepthLevel )
         newDictionary[tuple( i*2+addAmount*(-1 if i<0 else 1) for i in coordinate )] = dictionaryName[coordinate]
     return newDictionary
     
-#grid = cPickle.loads(zlib.decompress(base64.b64decode(urllib.urlopen("http://pastee.co/OQ5POF/raw").read()))); minDepthLevel = 0
+    
+#grid = grid2
 calculatedGrid = convertCoordinates( grid, minDepthLevel )
 
 #Get maximum depth level
@@ -94,19 +121,23 @@ for x in octreeRange:
     for y in octreeRange:
         for z in octreeRange:
             octreeStructure.add( ( x, y, z ) )
-octreeDepthName = "Depth"
-octreeDataName = "Data"
-octreeData = {"Depth":maxDepthLevel, "Data": dict.fromkeys( octreeStructure, False )}
+            
+octreeData = {"Depth": maxDepthLevel, "Nodes": dict.fromkeys( octreeStructure, False ), "Data": 0}
 
 
+
+#Convert coordinates into keys
 originalCoordinates = dict.fromkeys( calculatedGrid.keys() )
 for absoluteCoordinate in originalCoordinates.keys():
+    #Get min depth for block
+    individualMinDepth = getMinDepth( minDepthLevel, calculatedGrid[absoluteCoordinate] )
+    
     #Find the path down the depth levels
     multiplierList = {0: [], 1: [], 2: []}
     for key in multiplierList.keys():
-        maxMultiplier = pow( 2, maxDepthLevel )
+        maxMultiplier = pow( 2, octreeData["Depth"] )
         totalMultiplier = 0
-        while maxMultiplier > pow( 2, minDepthLevel )*0.9:
+        while maxMultiplier > pow( 2, individualMinDepth )*0.9:
             #Detect if it should be positive or negative
             currentMultiplier = maxMultiplier
             if absoluteCoordinate[key] > totalMultiplier:
@@ -123,6 +154,8 @@ for absoluteCoordinate in originalCoordinates.keys():
             
     originalCoordinates[absoluteCoordinate] = multiplierList
     
+#pp( originalCoordinates )
+
 #Write into dictionary
 for relativeCoordinate in originalCoordinates:
     
@@ -130,26 +163,52 @@ for relativeCoordinate in originalCoordinates:
     relativeValues = originalCoordinates[relativeCoordinate]
     relativeCoordinates = zip( relativeValues[0], relativeValues[1], relativeValues[2] )
     
-    #Fill with True
-    dictionaryFix = [("Data")]*( len( relativeCoordinates )*2 )
+    #Get ID
+    blockInfo = calculatedGrid[relativeCoordinate]
+    infoType = type( blockInfo )
+    try:
+        if infoType in ( float, int, str ):
+            blockID = int( blockInfo )
+        else :
+            blockID = blockInfo[0]
+    except:
+        blockID = 0
+    individualMinDepth = getMinDepth( minDepthLevel, calculatedGrid[relativeCoordinate] )
+    
+    #Fill with ID
+    dictionaryFix = [("Nodes")]*( len( relativeCoordinates )*2 )
     dictionaryFix[1::2] = relativeCoordinates
-    dictionaryFix.append( calculatedGrid[relativeCoordinate] )
+    dictionaryFix.append( blockID )
     editDictionary( octreeData, dictionaryFix )
     
-    #Fill empty values with False
+    #Fill extra values
     currentDepth = 0
     maxDepth = octreeData["Depth"]-minDepthLevel
     while currentDepth < maxDepth:
         depthDictionaryPath = dictionaryFix[:-1]
+        #Fill empty values with 0
         currentDictionaryDepth = reduce( dict.__getitem__, depthDictionaryPath[:-1-currentDepth*2], octreeData )
         for i in octreeStructure:
             if currentDictionaryDepth.get( i, None ) == None:
-                currentDictionaryDepth[i] = False
-                editDictionary( octreeData, depthDictionaryPath[:-1-currentDepth*2]+[i, False], False )
-        #Fill in depth
-        editDictionary( octreeData, depthDictionaryPath[:-2-currentDepth*2]+["Depth", currentDepth+minDepthLevel], False )
-        currentDepth += 1
+                #currentDictionaryDepth[i] = 0
+                editDictionary( octreeData, depthDictionaryPath[:-1-currentDepth*2]+[i, 0], 0 )
+                
+        #Summarise child nodes
+        '''
+        in range keys:
+            if any keys = dictionary without ["Data"]
+                go down and summarise that
+                return number
+            find most common number
             
+            move up level and repeat
+        
+        '''
+        
+        #Fill in depth
+        editDictionary( octreeData, depthDictionaryPath[:-2-currentDepth*2]+["Depth", currentDepth+individualMinDepth], False )
+        currentDepth += 1
+    
     #Move up a level if all values are 1
     dictionaryPath = dictionaryFix[:-2]
     while True:
@@ -178,12 +237,13 @@ def formatOctree( dictionaryValue, minDepthLevel, startingCoordinates=[0, 0, 0] 
             addAmount += pow( 2, depthIncrement )/2.0
             depthIncrement += 1
     differenceInDepth = currentDepth-minDepthLevel
-    for key in dictionaryValue["Data"].keys():
+    
+    for key in dictionaryValue["Nodes"].keys():
         newCoordinate = [depthMultiplier*i for i in key]
         newCoordinate[0] += startingCoordinates[0]
         newCoordinate[1] += startingCoordinates[1]
         newCoordinate[2] += startingCoordinates[2]
-        newDictionaryValue = dictionaryValue["Data"][key]
+        newDictionaryValue = dictionaryValue["Nodes"][key]
         
         if newDictionaryValue and str( newDictionaryValue ).isdigit():
             cubeSize = 2**currentDepth
@@ -198,7 +258,6 @@ def formatOctree( dictionaryValue, minDepthLevel, startingCoordinates=[0, 0, 0] 
                     moveCubeAmount -= 0.25
             else:
                 moveCubeAmount = 0
-            
             totalMovement = tuple( ( i+(1 if i<0 else -1) )/2+moveCubeAmount for i in newCoordinate )
             allPoints[totalMovement] = [cubeSize, newDictionaryValue]
         elif type( newDictionaryValue ) == dict:
@@ -207,7 +266,11 @@ def formatOctree( dictionaryValue, minDepthLevel, startingCoordinates=[0, 0, 0] 
 
 newList = formatOctree( octreeData, minDepthLevel )
 
+print "Time taken: {}".format( time.time()-st )
 import zlib, base64, cPickle
+with open( "C:/test.txt", "w" ) as txt:
+    txt.write( cPickle.dumps( newList ) )
+
 inputLength = len( cPickle.dumps( grid ) )
 octreeLength = len( cPickle.dumps( octreeData ) )
 print "Length of input:  {0}".format( inputLength )
@@ -215,13 +278,11 @@ print "Length of octree: {0}".format( octreeLength )
 print "{0}% efficiency".format( round( float( inputLength )/octreeLength, 2 )*100 )
 print "Length of output:  {0}".format( len( cPickle.dumps( newList ) ) )
 
-print time.time()-st
-
-
-for coordinates in newList.keys():
-    cubeSize = newList[coordinates][0]
-    blockID = newList[coordinates][1]
-    newCube = pm.polyCube( h=cubeSize, w=cubeSize, d=cubeSize )[0]
-    pm.move( newCube, coordinates )
-    pm.addAttr( newCube, shortName = 'id', longName = "blockID", attributeType = "byte" )
-    pm.setAttr( "{0}.id".format( newCube ), blockID )
+if True:
+    for coordinates in newList.keys():
+        cubeSize = newList[coordinates][0]
+        blockID = newList[coordinates][1]
+        newCube = pm.polyCube( h=cubeSize, w=cubeSize, d=cubeSize )[0]
+        pm.move( newCube, coordinates )
+        pm.addAttr( newCube, shortName = 'id', longName = "blockID", attributeType = "byte" )
+        pm.setAttr( "{0}.id".format( newCube ), blockID )
