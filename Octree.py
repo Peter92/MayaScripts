@@ -164,10 +164,10 @@ for absoluteCoordinate in originalCoordinates.keys():
             
     originalCoordinates[absoluteCoordinate] = multiplierList
     
-#pp( originalCoordinates )
-
+    
 #Write into dictionary
 for relativeCoordinate in originalCoordinates:
+    pathsToSimplify = set()
     
     #Get the coordinates for each depth level
     relativeValues = originalCoordinates[relativeCoordinate]
@@ -200,14 +200,17 @@ for relativeCoordinate in originalCoordinates:
             oldDictionaryValue = oldDictionaryValue[:-2]
         else:
             if type( oldValue ) == int:
+                
                 #print oldValue, oldDictionaryValue
                 #print dictionaryFix
                 for dictionaryValueToFix in recursiveList( [oldDictionaryValue], octreeStructure, len(dictionaryFix), True ):
-                    canEdit = False
+                    #Update dictionary if at the correct length
                     if len(dictionaryValueToFix) == len(dictionaryFix):
-                        canEdit = True
-                    editDictionary( octreeData, dictionaryValueToFix+[oldValue], canEdit )
-                    editDictionary( octreeData, dictionaryValueToFix[:-2]+["Depth",octreeData["Depth"]-len(dictionaryValueToFix)/2+1] )
+                        editDictionary( octreeData, dictionaryValueToFix+[oldValue] )
+                        #Append to list to simplify after
+                        pathsToSimplify.update( [tuple(dictionaryValueToFix[:-1])] )
+                    editDictionary( octreeData, dictionaryValueToFix[:-2]+["Depth",octreeData["Depth"]-len(dictionaryValueToFix)/2+1], False )
+
             break
     
     dictionaryFix.append( blockID )
@@ -241,16 +244,18 @@ for relativeCoordinate in originalCoordinates:
         currentDepth += 1
     
     #Move up a level if all values are 1
-    dictionaryPath = dictionaryFix[:-2]
-    while True:
-        allValuesAtDepth = reduce( dict.__getitem__, dictionaryPath, octreeData )
-        allPointValues = [allValuesAtDepth.get( coordinate, None ) for coordinate in octreeStructure]
-        everythingIsPoint = all( x == allPointValues[0] and str( x ).isdigit() for x in allPointValues )
-        if everythingIsPoint:
-            editDictionary( octreeData, dictionaryPath[:-1]+[allPointValues[0]] )
-            dictionaryPath = dictionaryPath[:-2]
-        else:
-            break
+    pathsToSimplify.update( [tuple( dictionaryFix[:-2] )] )
+    #dictionaryPath = dictionaryFix[:-2]
+    for dictionaryPath in [list( x ) for x in pathsToSimplify]:
+        while True:
+            allValuesAtDepth = reduce( dict.__getitem__, dictionaryPath, octreeData )
+            allPointValues = [allValuesAtDepth.get( coordinate, None ) for coordinate in octreeStructure]
+            everythingIsPoint = all( x == allPointValues[0] and str( x ).isdigit() for x in allPointValues )
+            if everythingIsPoint:
+                editDictionary( octreeData, dictionaryPath[:-1]+[allPointValues[0]] )
+                dictionaryPath = dictionaryPath[:-2]
+            else:
+                break
 
 
 #Calculate points
