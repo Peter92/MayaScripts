@@ -6,12 +6,13 @@ Info
  - Set ID to 0 to remove block, dictionary will automatically clean
  
  - Find ID before editing dictionary, if leaf needs to be made, fill all blocks with same ID
+ - If changed != True, set to true and all branches to true
 """
 from pprint import PrettyPrinter
 pp = PrettyPrinter().pprint
 
 import pymel.core as pm
-import math
+import math, sys
 from operator import itemgetter
 class EditError( Exception ):
     pass
@@ -29,7 +30,7 @@ def editDictionary( dictionaryName, listOfValues, canOverwriteKeys=True ):
         except EditError:
             reducedDictionary[i] = {}
         except:
-            print "Something went wrong"
+            print "Error editing dictionary: {}.".format( sys.exc_info()[1] )
             return
         reducedDictionary = reducedDictionary[i]
     if canOverwriteKeys or ( not canOverwriteKeys and not reducedDictionary.get( listOfValues[-2], None ) ):
@@ -37,7 +38,16 @@ def editDictionary( dictionaryName, listOfValues, canOverwriteKeys=True ):
         return True
     else:
         return False
-        
+def recursiveList( currentInput, combinations, length, returnAll=False ):
+    newInputList = []
+    for input in currentInput:
+        inputWithinRange = len( input ) < length
+        if inputWithinRange:
+            for combination in combinations:
+                newInputList += recursiveList( [input + [input[0], combination]], combinations, length, returnAll )
+        if not inputWithinRange or returnAll:
+            newInputList.append( input )
+    return newInputList
 def roundToMultiple( multiple, *args ):
     maxPower = 0
     for i in args:
@@ -74,9 +84,9 @@ grid[(3,0,1)] = 1
 grid[(3,0,0)] = 5 #To demonstrate blocks not grouping if different ID
 
 grid = {}
-grid[(1,0,0)] = 2
-grid[(0,0,1)] = [1,4]
-grid[(2,0,0)] = 2
+#grid[(2,0,0)] = 2
+grid[(0,0,1)] = [3,4]
+grid[(6,0,0)] = 2
 
 minDepthLevel = 0
 
@@ -122,7 +132,7 @@ for x in octreeRange:
         for z in octreeRange:
             octreeStructure.add( ( x, y, z ) )
             
-octreeData = {"Depth": maxDepthLevel, "Nodes": dict.fromkeys( octreeStructure, False ), "Data": 0}
+octreeData = {"Depth": maxDepthLevel, "Nodes": dict.fromkeys( octreeStructure, 0 ), "Data": 0}
 
 
 
@@ -147,7 +157,7 @@ for absoluteCoordinate in originalCoordinates.keys():
                 currentMultiplier *= -1
             else:
                 multiplierList[key].append( 1 )
-                print "Something is wrong, coordinate value is even"
+                #print "Something is wrong, coordinate value is even"
             #Append to total
             totalMultiplier += currentMultiplier
             maxMultiplier /= 2.0
@@ -173,25 +183,47 @@ for relativeCoordinate in originalCoordinates:
             blockID = blockInfo[0]
     except:
         blockID = 0
+        
     individualMinDepth = getMinDepth( minDepthLevel, calculatedGrid[relativeCoordinate] )
     
-    #Fill with ID
+    #Fill recursively with ID
     dictionaryFix = [("Nodes")]*( len( relativeCoordinates )*2 )
     dictionaryFix[1::2] = relativeCoordinates
+    print "Block info: {}".format(blockInfo)
+    #Figure out if something already exists
+    oldDictionaryValue = dictionaryFix
+    while oldDictionaryValue:
+        try:
+            oldValue = reduce( dict.__getitem__, oldDictionaryValue, octreeData )
+            #print oldValue, oldDictionaryValue
+        except:
+            oldDictionaryValue = oldDictionaryValue[:-2]
+        else:
+            if type( oldValue ) == int:
+                #print oldValue, oldDictionaryValue
+                #print dictionaryFix
+                for dictionaryValueToFix in recursiveList( [oldDictionaryValue], octreeStructure, len(dictionaryFix), True ):
+                    canEdit = False
+                    if len(dictionaryValueToFix) == len(dictionaryFix):
+                        canEdit = True
+                    editDictionary( octreeData, dictionaryValueToFix+[oldValue], canEdit )
+                    editDictionary( octreeData, dictionaryValueToFix[:-2]+["Depth",octreeData["Depth"]-len(dictionaryValueToFix)/2+1] )
+            break
+    
     dictionaryFix.append( blockID )
     editDictionary( octreeData, dictionaryFix )
     
     #Fill extra values
     currentDepth = 0
     maxDepth = octreeData["Depth"]-minDepthLevel
+    depthDictionaryPath = dictionaryFix[:-1]
     while currentDepth < maxDepth:
-        depthDictionaryPath = dictionaryFix[:-1]
         #Fill empty values with 0
         currentDictionaryDepth = reduce( dict.__getitem__, depthDictionaryPath[:-1-currentDepth*2], octreeData )
         for i in octreeStructure:
             if currentDictionaryDepth.get( i, None ) == None:
                 #currentDictionaryDepth[i] = 0
-                editDictionary( octreeData, depthDictionaryPath[:-1-currentDepth*2]+[i, 0], 0 )
+                editDictionary( octreeData, depthDictionaryPath[:-1-currentDepth*2]+[i, 0], False )
                 
         #Summarise child nodes
         '''
@@ -204,7 +236,6 @@ for relativeCoordinate in originalCoordinates:
             move up level and repeat
         
         '''
-        
         #Fill in depth
         editDictionary( octreeData, depthDictionaryPath[:-2-currentDepth*2]+["Depth", currentDepth+individualMinDepth], False )
         currentDepth += 1
