@@ -72,7 +72,7 @@ grid[(0,1,1)] = 1
 grid[(1,1,0)] = 1
 grid[(1,1,1)] = 1
 grid[(3,0,-1)] = 1
-grid[(10,0,-3)] = [1,2]
+grid[(10,0,-3)] = 1
 
 grid[(2,1,1)] = 1
 grid[(2,1,0)] = 1
@@ -83,17 +83,12 @@ grid[(3,1,0)] = 1
 grid[(3,0,1)] = 1
 grid[(3,0,0)] = 5 #To demonstrate blocks not grouping if different ID
 
-grid = {}
-#grid[(2,0,0)] = 2
-grid[(0,0,1)] = [3,2]
-grid[(2,0,0)] = [1,-1]
-grid[(3,0,0)] = [1,-1]
-
-
+'''
 grid = {}
 #grid[(2,0,0)] = 2
 grid[(0,0,1)] = 2
 grid[(1,0,0)] = [3,3]
+'''
 
 minDepthLevel = 0
 
@@ -119,7 +114,7 @@ def convertCoordinates( dictionaryName, minDepthLevel=0 ):
     return newDictionary
 
     
-grid = grid2
+#grid = grid2
 calculatedGrid = convertCoordinates( grid, minDepthLevel )
 
 
@@ -311,8 +306,10 @@ def formatOctree( dictionaryValue, minDepthLevel, absoluteMinDepth=None, startin
     allPoints = {}
     currentDepth = dictionaryValue["Depth"]
     depthMultiplier = pow( 2, currentDepth )
-    #Amount to add to the position
+    #Amount to add to the position, addToNegative to connect at the axis
+    addToNegative = 0
     if minDepthLevel > 0:
+        addToNegative = 1-pow( 2, ( minDepthLevel ) )
         addAmount = 1-pow( 2, ( minDepthLevel-1 ) )
     else:
         depthIncrement = minDepthLevel+1
@@ -321,7 +318,15 @@ def formatOctree( dictionaryValue, minDepthLevel, absoluteMinDepth=None, startin
             addAmount += pow( 2, depthIncrement )/2.0
             depthIncrement += 1
     differenceInDepth = currentDepth-minDepthLevel
-    
+
+    #Fix for things separating on the axis if using LOD values
+    movementAppendAmount = 0
+    if absoluteMinDepth != None and absoluteMinDepth > minDepthLevel:
+        movementAppendAmount = pow( 2, minDepthLevel )/2.0
+        if absoluteMinDepth-1 != minDepthLevel:
+            movementAppendAmount = -movementAppendAmount
+            
+                
     for key in dictionaryValue["Nodes"].keys():
         newCoordinate = [depthMultiplier*i for i in key]
         newCoordinate[0] += startingCoordinates[0]
@@ -331,24 +336,21 @@ def formatOctree( dictionaryValue, minDepthLevel, absoluteMinDepth=None, startin
         
         if newDictionaryValue:
             
-            skippedRecursion = False
+            valueID = None
             if type( newDictionaryValue ) == dict:
                 #Don't look below the minimum depth
                 if newDictionaryValue["Depth"] < absoluteMinDepth and absoluteMinDepth != None:
                     valueID = newDictionaryValue["Data"]
-                    skippedRecursion = True
                 else:
-                    #Recursively look down
+                    #Recursively loop down
                     allPoints.update( formatOctree( newDictionaryValue, minDepthLevel, absoluteMinDepth, newCoordinate ) )
                     valueID = None
             elif str( newDictionaryValue ).isdigit():
                 #If it's a number
                 valueID = newDictionaryValue
-            else:
-                #Set to none
-                valueID = None
+            
                 
-            if valueID != None:
+            if valueID:
                 
                 cubeSize = 2**currentDepth
                 #Increment position if conditions are met
@@ -358,18 +360,20 @@ def formatOctree( dictionaryValue, minDepthLevel, absoluteMinDepth=None, startin
                 #Fix for strange behaviour when minDepthLevel = -1
                 elif differenceInDepth > 0:
                     moveCubeAmount = 1
-                    #Fix for stranger behaviour when minDepthLevel = -1 and it's a big generation
+                    #Fix for stranger behaviour when it's also a big generation
                     if differenceInDepth > 1:
                         moveCubeAmount -= 0.25
                 else:
                     moveCubeAmount = 0
+                
                     
-                totalMovement = tuple( ( i+(1 if i<0 else -1) )/2+moveCubeAmount for i in newCoordinate )
+                totalMovement = tuple( x+(movementAppendAmount-addToNegative if x<0 else -movementAppendAmount) for x in ( ( i+(1 if i<0 else -1) )/2+moveCubeAmount for i in newCoordinate ) )
+                
                 allPoints[totalMovement] = [cubeSize, valueID]
                 
     return allPoints
 
-newList = formatOctree( octreeData, minDepthLevel, 0 )
+newList = formatOctree( octreeData, minDepthLevel, 1 )
 
 print "{}: Formatted octree into usable points".format( TimeOutput( st, time.time() ) )
 import zlib, base64, cPickle
