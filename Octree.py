@@ -95,22 +95,33 @@ minDepthLevel = 0
 import time
 st = time.time()
 
-#Get min depth level if it exists
-def getMinDepth( minDepthLevel, blockInfo ):
-    try:
-        return int( blockInfo[1] )
-    except:
-        return minDepthLevel
-        
 #Convert to new format that gets rid of even values
 def convertCoordinates( dictionaryName, minDepthLevel=0 ):
     newDictionary = {}
+    addAmount = pow( 2, minDepthLevel )
+    
     for coordinate in dictionaryName.keys():
         
-        minDepthLevel = getMinDepth( minDepthLevel, dictionaryName[coordinate] )
+        #Get depth if set
+        if type( dictionaryName[coordinate] ) == list:
+            coordinateID = dictionaryName[coordinate][0]
+            differenceInDepth = dictionaryName[coordinate][1]-minDepthLevel
+        else:
+            coordinateID = dictionaryName[coordinate]
+            differenceInDepth = 0
         
-        addAmount = pow( 2, minDepthLevel )
-        newDictionary[tuple( i*2+addAmount*(-1 if i<0 else 1) for i in coordinate )] = dictionaryName[coordinate]
+        #Convert larger cubes into multiple small ones
+        extraSize = pow( 2, differenceInDepth )/2
+        
+        x, y, z = coordinate
+        rangeX = xrange( int( math.floor( x-extraSize ) ), int( math.ceil( x+extraSize+1 ) ) )
+        rangeY = xrange( int( math.floor( y-extraSize ) ), int( math.ceil( y+extraSize+1 ) ) )
+        rangeZ = xrange( int( math.floor( z-extraSize ) ), int( math.ceil( z+extraSize+1 ) ) )
+        for x in rangeX:
+            for y in rangeY:
+                for z in rangeZ:
+                    newDictionary[tuple( i*2+addAmount*( -1 if i<0 else 1 ) for i in ( x, y, z ) )] = coordinateID
+                    
     return newDictionary
 
     
