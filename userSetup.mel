@@ -1,0 +1,24 @@
+//  Auto Save Script Editor:
+//      It will run every x seconds and save the contents in the script editor.
+//
+//      The only way to save the scripts involves highlighting everything, which
+//      can be inconvenient, so it will print a short countdown if silent mode
+//      isn't active.
+//      This is also why the interval is set to 120 seconds, as any less could get
+//      annoying.
+//  
+//      The script will also write backup files which will be deleted when Maya
+//      exists normally, so if something happens to go wrong when saving and a
+//      crash corrupts some scripts, there should be a backup in the folder you
+//      can rename.
+
+$load_on_startup = true;        // If the backup should automatically run - true/false
+
+$silent_mode = "False";         // If messages should be disabled - "True"/"False"
+$autosave_interval = "20";      // How often it should save in seconds - 2 or above
+
+evalDeferred("python(\"from SEAutoSave import AutoSave\")");                            // Import module
+evalDeferred("python(\"AutoSave().silent(\"+$silent_mode+\")\")");                      // Change if messages are disabled
+if($load_on_startup){
+    evalDeferred("python(\"AutoSave().start(\"+$autosave_interval+\", 10, True)\")");   // Start thread
+}
