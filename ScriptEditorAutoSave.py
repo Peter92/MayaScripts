@@ -5,24 +5,33 @@ import maya.mel as mel
 import os, time
 from os.path import isfile, join
 
+       
 class AutoSaveThread(object):
     printPrefix = 'SE Auto Save: '
-    def __init__(self):
+    def __init__( self, wait=0, firstRun=False ):
+        self.wait = wait
         self.location = AutoSave().location()
         self.enabled=True
         thread = threading.Thread(target=self.run, args=())
         thread.daemon = True
         thread.start()
     def run(self):
+        time.sleep( self.wait )
+        if firstRun:
+            MoveBackupScriptsToFolder( self.location )
         printStuff( "Started at intervals of {} seconds".format( AutoSave().interval() ), AutoSave().silent(), self.printPrefix )
         alreadySaidItsPaused = False
         while AutoSave().enabled():
             AutoSave().progress( time.time() )
             if not AutoSave().paused():
-                alreadySaidItsPaused = False
                 interval = AutoSave().interval()
+                #Update if just stopped being paused
+                if alreadySaidItsPaused:
+                    printStuff( "Resuming backup, activating in {0} seconds.",format( interval ), AutoSave().silent(), self.printPrefix )
+                    alreadySaidItsPaused = False
                 intervals = notifySave( interval )
                 totalCount = 0
+                #Count down from max time
                 for i in xrange( interval, 0, -1 ):
                     if AutoSave().enabled() > 0:
                         if i in intervals:
@@ -47,7 +56,7 @@ class AutoSaveThread(object):
                 if not alreadySaidItsPaused:
                     alreadySaidItsPaused = True
                     printStuff( "Paused by user", AutoSave().silent(), self.printPrefix )
-                time.sleep(2)
+                time.sleep(1)
         AutoSave().progress( False )
         printStuff( "Cancelled by user", AutoSave().silent(), self.printPrefix )
 
@@ -113,26 +122,36 @@ class AutoSave:
     printName = 'scriptEditorSilentSave'
     locationName = 'scriptEditorSaveLocation'
     def __init__(self):
-        if pm.optionVar.get( self.autoSaveName, None ) == None:
-            self.start()
         if pm.optionVar.get( self.intervalName, None ) == None:
-            self.interval(60)
+            self.interval(120)
         if pm.optionVar.get( self.progressName, None ) == None:
             self.progress(False)
         if pm.optionVar.get( self.printName, None ) == None:
             self.silent(False)
         self.location(True)
-    def start(self):
-        pm.optionVar[self.autoSaveName]=True
-        if not self.progress() or time.time()-2 > self.progress():
-            AutoSaveThread()
+        if pm.optionVar.get( self.autoSaveName, None ) == None:
+            self.enabled(False)
+    def start( self, timing=None, wait=0, firstRun=False ):
+        #Set interval
+        if str(timing).isdigit():
+            self.interval( timing )
+        #Find if previously paused
+        wasPaused = False
+        if self.paused():
+            wasPaused = True
+            printStuff( "Resuming backup in {0} seconds".format( self.interval() ), self.silent(), AutoSaveThread.printPrefix )
+        self.enabled(True)
+        if not self.progress() or time.time()-2 > self.progress() and not wasPaused:
+            AutoSaveThread( wait, firstRun )
     def pause(self):
-        pm.optionVar[self.autoSaveName]=-1
+        self.enabled(-1)
+    def unpause(self):
+        self.enabled(True)
     def stop(self):
         self.progress(False)
-        pm.optionVar[self.autoSaveName]=False
+        self.enabled(False)
     def paused(self):
-        return pm.optionVar[self.autoSaveName] == -1
+        return self.enabled() == -1
     def interval(self,timing=None):
         if timing==None:
             return pm.optionVar[self.intervalName]
@@ -141,9 +160,11 @@ class AutoSave:
         except:
             pass
         else:
-            pm.optionVar[self.intervalName]=max(1,timing)
-    def enabled(self):
-        return pm.optionVar[self.autoSaveName]
+            pm.optionVar[self.intervalName]=max(2,timing)
+    def enabled(self,state=None):
+        if state==None:
+            return pm.optionVar[self.autoSaveName]
+        pm.optionVar[self.autoSaveName]=state
     def progress(self,progress=None):
         if progress==None:
             return pm.optionVar[self.progressName]
@@ -156,8 +177,20 @@ class AutoSave:
         if update==None:
             return pm.optionVar[self.locationName]
         pm.optionVar[self.locationName] = pm.internalVar( userPrefDir=True )
-        
+
+
+def MoveBackupScriptsToFolder( saveLocation=None ):
+    if saveLocation == None:
+        saveLocation = AutoSave().location()
+    saveLocation += "scriptEditorTemp/"
+    newBackupDir = saveLocation+'backup-'+str( int( time.time() ) )+"/"
+    fileNames = [f for f in os.listdir( saveLocation ) if os.path.isfile( os.path.join( saveLocation, f ) )]
+    for i in fileNames:
+        if 'Backup' in i:
+            if not os.path.exists( newBackupDir ):
+                os.makedirs( newBackupDir )
+            os.rename(saveLocation+i, newBackupDir+i.replace( 'Backup', '' ))
+
+#Reset progress in case it wasn't properly stopped on previous run
 if firstRun:
     AutoSave().progress(False)
-if __name__ == '__main__':
-    AutoSave().start()
