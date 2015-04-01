@@ -212,6 +212,17 @@ class AutoSave:
     """Control the auto save thread. Setting values in this will edit the
     prefs dictionary (pymel.core.optionVar), so values will be persistent
     between sessions.
+    
+    Functions:
+        start( interval=0 ) - start thread
+        pause() - pause/unpause execution
+        paused() - return if paused
+        stop() - stop thread
+        interval() - how many seconds between saves
+        enabled() - current state of thread
+        progress() - current progress of thread
+        location() - location of script editor files
+        silent() - if messages should be disabled
     """
     def __init__(self):
         """Auto set values if they don't exist yet."""
