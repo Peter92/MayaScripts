@@ -182,8 +182,8 @@ for x in range( -num, num2+1 ):
             
 
 
-#grid = grid2
-minDepthLevel = 0
+grid = grid2
+minDepthLevel = -1
 maxDepthGrouping = 100000
 
 import time
@@ -521,15 +521,15 @@ with open( "C:/test.txt", "w" ) as txt:
 
 if True:
     for coordinates in newList.keys():
-        blockID, cubeSize = newList[coordinates]
-        cubeSize = 2**cubeSize
+        blockID, depthLevel = newList[coordinates]
+        cubeSize = pow( 2, depthLevel )
         newCube = pm.polyCube( h=cubeSize, w=cubeSize, d=cubeSize )[0]
         pm.move( newCube, coordinates )
         pm.addAttr( newCube, shortName = 'id', longName = "blockID" , attributeType = "byte" )
-        pm.setAttr( "{0}.id".format( newCube ), blockID )
+        pm.setAttr( "{}.id".format( newCube ), blockID )
+        pm.polyEditUV( '{}.map[:]'.format( newCube ), su=cubeSize*6, sv=cubeSize*8 )
 
     print "{}: Drew cubes".format( TimeOutput( st, time.time() ) )
-
 
 inputLength = len( cPickle.dumps( grid ) )
 octreeLength = len( cPickle.dumps( octreeData ) )
