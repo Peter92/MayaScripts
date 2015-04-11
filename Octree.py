@@ -199,8 +199,8 @@ for x in range( -num, num2+1 ):
             
 
 
-#grid = grid2
-minDepthLevel = 0
+grid = grid2
+#minDepthLevel = 0
 maxDepthGrouping = 100000
 
 import time
@@ -210,8 +210,14 @@ st = time.time()
 newGrid = {}
 for coordinate in grid:
     try:
-        if type( grid[coordinate] ) in ( list, tuple ):
-            cubeID = grid[coordinate][0]
+        inputType = type( grid[coordinate] )
+        if inputType in ( list, tuple ):
+            cubeData = grid[coordinate][0]
+            #Fix for if the output is given as input
+            if type( cubeData ) == VoxelPointInfo:
+                cubeID = cubeData.id
+            else:
+                cubeID = cubeData
             cubeDepth = grid[coordinate][1]
             cubeExtra = tuple( grid[coordinate][2:] )
         else:
@@ -537,7 +543,8 @@ if True:
         pm.move( newCube, coordinates )
         pm.addAttr( newCube, shortName = 'id', longName = "blockID" , attributeType = "byte" )
         pm.setAttr( "{}.id".format( newCube ), blockID )
-        pm.polyEditUV( '{}.map[:]'.format( newCube ), su=cubeSize*3, sv=cubeSize*4 )
+        UVSize = cubeSize/pow( 2.0, minDepthLevel )
+        pm.polyEditUV( '{}.map[:]'.format( newCube ), su=UVSize*3, sv=UVSize*4 )
 
     print "{}: Drew cubes".format( TimeOutput( st, time.time() ) )
 
