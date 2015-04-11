@@ -4,7 +4,13 @@ Info
  - Range is -(2^depth)/2-1 to (2^depth)/2 (eg. -256 to 255)
  
  - Point3D and Cube class from mkrieger
+ 
+ 
+To do:
+ - Block ID defines UV rules
+ - OctreeData["nodes"] = OctreeData["nodes"][anything]["nodes"]
 '''
+from collections import namedtuple
 from codeStuff import TimeOutput
 from pprint import PrettyPrinter
 pp = PrettyPrinter().pprint
@@ -13,10 +19,21 @@ import pymel.core as pm
 import math, sys, decimal
 from operator import itemgetter
 from itertools import product
+
+def Debug():
+    """Return True to debug things"""
+    return False
+
 class EditError( Exception ):
+    pass
+    
+class VoxelPointInfo( namedtuple( 'PointData', 'id' ) ):
     pass
 
 def editDictionary( dictionaryName, listOfValues, canOverwriteKeys=True ):
+    """Edit a dictionary by passing a list, where it will create the path.
+    If canOverwriteKeys is set to True, it will override existing values to make the path.
+    """
     reducedDictionary = dictionaryName
     for i in listOfValues[:-2]:
         if type( reducedDictionary ) != dict and canOverwriteKeys:
@@ -160,7 +177,7 @@ grid[(1,0,1)] = 1
 grid[(0,1,0)] = 1
 grid[(0,1,1)] = 1
 grid[(1,1,0)] = 1
-grid[(1,1,1)] = 1
+grid[(1,1,1)] = (1, 0, 3151)
 
 grid[(2,1,1)] = 5
 grid[(10,0,-3)] = [1,1]
@@ -171,7 +188,7 @@ grid[(2,0,1)] = 1
 grid[(2,0,0)] = 1
 grid[(3,1,1)] = 1
 grid[(3,1,0)] = 1
-grid[(3,0,1)] = 1
+grid[(3,0,1)] = 0
 grid[(3,0,0)] = 5 #To demonstrate blocks not grouping if different ID
 num = 4
 num2 = -1
@@ -182,13 +199,40 @@ for x in range( -num, num2+1 ):
             
 
 
-grid = grid2
-minDepthLevel = -1
+#grid = grid2
+minDepthLevel = 0
 maxDepthGrouping = 100000
 
 import time
 st = time.time()
 
+
+newGrid = {}
+for coordinate in grid:
+    try:
+        if type( grid[coordinate] ) in ( list, tuple ):
+            cubeID = grid[coordinate][0]
+            cubeDepth = grid[coordinate][1]
+            cubeExtra = tuple( grid[coordinate][2:] )
+        else:
+            cubeID = grid[coordinate]
+            cubeDepth = minDepthLevel
+            cubeExtra = ()
+    except:
+        cubeID = 0
+        cubeDepth = minDepthLevel
+    
+    #Round to the nearest point and floor if the depth level is lower than min depth level
+    #Fixes if cube exactly matches octree but is the wrong depth, as it would think there was an extra layer
+    nearestRound = 1/pow( 2.0, minDepthLevel )
+    newCoordinate = [math.floor( x*nearestRound )/nearestRound for x in coordinate]
+    
+    newPointInfo = ( cubeID, minDepthLevel ) + cubeExtra
+    
+    Point3DGrid = {c.center: newPointInfo for c in Cube( newCoordinate, cubeDepth ).divide( minDepthLevel )}
+    newGrid.update( Point3DGrid )
+    
+print "Number of points calculated: {0}".format( len( newGrid.keys() ) )
 
 #Convert to new format that gets rid of even values
 def convertCoordinates( dictionaryName, minDepthLevel=0 ):
@@ -199,64 +243,18 @@ def convertCoordinates( dictionaryName, minDepthLevel=0 ):
     for coordinate in dictionaryName.keys():
         
         #Get depth if set
-        if type( dictionaryName[coordinate] ) == list:
+        if type( dictionaryName[coordinate] ) in ( list, tuple ):
             coordinateID = dictionaryName[coordinate][0]
         else:
             coordinateID = dictionaryName[coordinate]
-            
-        #newCoordinate = tuple( i*2+addAmount for i in coordinate )
+        
+        #Calculate new coordinates
         P3DCoordinate = coordinate*2+addAmount
         newCoordinate = tuple( [P3DCoordinate.x, P3DCoordinate.y, P3DCoordinate.z] )
-        newDictionary[newCoordinate] = coordinateID
+        newDictionary[newCoordinate] = VoxelPointInfo( coordinateID )
         
     return newDictionary
 
-
-
-def recursiveCoordinate( coordinate, coordinateInfo, minDepthLevel, octreeStructure ):
-    
-    newDictionary = {}
-    
-    if type( coordinateInfo ) != list:
-        coordinateInfo = [coordinateInfo,minDepthLevel]
-   
-    coordinateDepth = coordinateInfo[1]
-    
-    if coordinateDepth > minDepthLevel:
-        coordinateInfo[1] -= 1
-        moveAmount = pow( 2, minDepthLevel-2 )
-        for i in octreeStructure:
-            newCoordinate = [i[j]*moveAmount+coordinate[j] for j in xrange( 3 )]
-            newDictionary.update( recursiveCoordinate( newCoordinate, coordinateInfo, minDepthLevel, octreeStructure ) )
-            
-    else:
-        newDictionary[tuple( coordinate )] = coordinateInfo
-    
-    return newDictionary
-
-newGrid = {}
-for coordinate in grid:
-    try:
-        if type( grid[coordinate] ) == list:
-            cubeID = grid[coordinate][0]
-            cubeDepth = grid[coordinate][1]
-        else:
-            cubeID = grid[coordinate]
-            cubeDepth = minDepthLevel
-    except:
-        cubeID = 0
-        cubeDepth = minDepthLevel
-    
-    #Round to the nearest point and floor if the depth level is lower than min depth level
-    #Fixes if cube exactly matches octree but is the wrong depth, as it would think there was an extra layer
-    nearestRound = 1/pow( 2.0, minDepthLevel )
-    coordinate = [math.floor( x*nearestRound )/nearestRound for x in coordinate]
-    
-    Point3DGrid = {c.center: [cubeID, minDepthLevel] for c in Cube( coordinate, cubeDepth ).divide( minDepthLevel )}
-    newGrid.update( Point3DGrid )
-    
-    #newGrid.update( recursiveCoordinate( coordinate, grid[coordinate], minDepthLevel, octreeStructure ) )
-print "Number of points calculated: {0}".format( len( newGrid.keys() ) )
 
 calculatedGrid = convertCoordinates( newGrid, minDepthLevel )
 #calculatedGrid = grid
@@ -305,7 +303,8 @@ for absoluteCoordinate in originalCoordinates.keys():
             else:
                 #If it is neither, negative should hopefully stop potential errors
                 multiplierList[key].append( 1 )
-                #print "Something is wrong, coordinate value is even"
+                if Debug():
+                    print "Something is wrong, coordinate value is even"
                 
             #Append to total
             totalMultiplier += currentMultiplier
@@ -317,6 +316,7 @@ print "{}: Converted coordinates into octree format".format( TimeOutput( st, tim
     
 #Write into dictionary
 pathsChanged = set()
+
 for relativeCoordinate in originalCoordinates:
     
     pathsToSimplify = set()
@@ -336,10 +336,10 @@ for relativeCoordinate in originalCoordinates:
     except:
         blockID = 0
     
-    #Fill recursively with ID
+    #Fill recursively with ID if something exists at a higher level
     dictionaryFix = [("Nodes")]*( len( relativeCoordinates )*2 )
     dictionaryFix[1::2] = relativeCoordinates
-    #print "Block info: {}".format(blockInfo)
+    
     #Figure out if something already exists
     oldDictionaryValue = dictionaryFix
     while oldDictionaryValue:
@@ -349,14 +349,14 @@ for relativeCoordinate in originalCoordinates:
             oldDictionaryValue = oldDictionaryValue[:-2]
         else:
             #Only do something if it's not 0 and is an integer (if dictionary, it's gone up to the maximum depth)
-            if oldValue and type( oldValue ) == int:
+            if oldValue and type( oldValue ) in ( int, namedTuple ):
                 
-                #print oldValue, oldDictionaryValue
-                #print dictionaryFix
                 for dictionaryValueToFix in recursiveList( [oldDictionaryValue], octreeStructure, len( dictionaryFix ), True ):
+                    
                     #Update dictionary if at the correct length
                     if len(dictionaryValueToFix) == len(dictionaryFix):
                         editDictionary( octreeData, dictionaryValueToFix+[oldValue] )
+                        
                         #Append to list to simplify after
                         pathsToSimplify.update( [tuple( dictionaryValueToFix[:-1] )] )
                         pathsChanged.update( [tuple( dictionaryValueToFix[:-1] )] )
@@ -366,8 +366,12 @@ for relativeCoordinate in originalCoordinates:
 
             break
     
+    #Add the voxel information
     pathsChanged.update( [tuple( dictionaryFix[:-1] )] )
-    dictionaryFix.append( blockID )
+    if not blockID:
+        dictionaryFix.append( blockID )
+    else:
+        dictionaryFix.append( VoxelPointInfo( blockID ) )
     editDictionary( octreeData, dictionaryFix )
     
     #Fill extra values
@@ -385,20 +389,25 @@ for relativeCoordinate in originalCoordinates:
         #Fill in depth
         editDictionary( octreeData, depthDictionaryPath[:-2-currentDepth*2]+["Depth", currentDepth+minDepthLevel], False )
         currentDepth += 1
-    
+        
     #Move up a level if all values are 1
     pathsToSimplify.update( [tuple( dictionaryFix[:-2] )] )
     for dictionaryPath in [list( x ) for x in pathsToSimplify]:
         
-        
+        counter = 0
         while True:
+            
+            #Temporary to make sure it doesn't happen
+            counter += 1
+            if counter > 100:
+                raise ValueError("infinite loop when grouping octree levels")
             
             #Get all values
             allValuesAtDepth = reduce( dict.__getitem__, dictionaryPath[:-1], octreeData )
             allPointValues = [allValuesAtDepth["Nodes"].get( coordinate, None ) for coordinate in octreeStructure]
             
             #Find if all 8 coordinates are the same
-            everythingIsPoint = all( x == allPointValues[0] for x in allPointValues ) and str( allPointValues[0] ).isdigit()
+            everythingIsPoint = all( x == allPointValues[0] for x in allPointValues )
             
             #Find current depth as to not group past the max amount
             currentDepth = allValuesAtDepth["Depth"]
@@ -507,7 +516,7 @@ def formatOctree( dictionaryValue, minDepthLevel, absoluteMinDepth=None, startin
         if valueID:
             totalMovement = tuple( i/2+addAmount for i in newCoordinate )
             #totalMovement = tuple( i/2+addAmount*(1 if i<0 else 1) for i in newCoordinate )
-            allPoints[totalMovement] = [valueID, currentDepth]
+            allPoints[totalMovement] = (valueID, currentDepth)
         
     return allPoints
     
@@ -521,13 +530,14 @@ with open( "C:/test.txt", "w" ) as txt:
 
 if True:
     for coordinates in newList.keys():
-        blockID, depthLevel = newList[coordinates]
+        blockData, depthLevel = newList[coordinates]
+        blockID = blockData.id
         cubeSize = pow( 2, depthLevel )
         newCube = pm.polyCube( h=cubeSize, w=cubeSize, d=cubeSize )[0]
         pm.move( newCube, coordinates )
         pm.addAttr( newCube, shortName = 'id', longName = "blockID" , attributeType = "byte" )
         pm.setAttr( "{}.id".format( newCube ), blockID )
-        pm.polyEditUV( '{}.map[:]'.format( newCube ), su=cubeSize*6, sv=cubeSize*8 )
+        pm.polyEditUV( '{}.map[:]'.format( newCube ), su=cubeSize*3, sv=cubeSize*4 )
 
     print "{}: Drew cubes".format( TimeOutput( st, time.time() ) )
 
