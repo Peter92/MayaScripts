@@ -4,8 +4,7 @@ Info
  - Range is -(2^depth)/2-1 to (2^depth)/2 (eg. -256 to 255)
  
  - Point3D and Cube class from mkrieger
- 
- 
+
 To do:
  - Block ID defines UV rules
  - OctreeData["nodes"] = OctreeData["nodes"][anything]["nodes"]
@@ -123,7 +122,6 @@ class Point3D:
         return 'Point3D({p.x}, {p.y}, {p.z})'.format(p=self)
         
 
-
 class Cube:
     """Representation of a cube."""
 
@@ -197,10 +195,36 @@ for x in range( -num, num2+1 ):
         for z in range( -num, num2+1 ):
             grid[(x,y,z)] = [1,0]
             
+'''
+#Minecraft file
+regionData = region.RegionFile( "C:/amp2.mca", 'rb' )
+newList3 = {}
+for chunk in regionData.get_metadata():   #or get_chunks
+    
+    xPos = chunk.x
+    zPos = chunk.z
+    
+    if max( xPos, zPos ) < 9 and min( xPos, zPos ) > 7:
+        for heightChunk in regionData.get_nbt( xPos, zPos )['Level']['Sections']:
+            
+            blockData = tuple( heightChunk['Blocks'] )
+            
+            xOffset = xPos*16
+            yOffset = int( str( heightChunk['Y'] ) )*16
+            zOffset = zPos*16
+            
+            counter = 0
+            for y in range( 16 ):
+                for z in range( 16 ):
+                    for x in range( 16 ):
+                        newList3[ (x+xOffset,y+yOffset,z+zOffset ) ] = blockData[counter]
+                        counter += 1
+                        
+print len( newList3 )
 
-
-grid = grid2
-#minDepthLevel = 0
+'''
+grid = newList3
+minDepthLevel = 0
 maxDepthGrouping = 100000
 
 import time
@@ -214,8 +238,10 @@ for coordinate in grid:
         if inputType in ( list, tuple ):
             cubeData = grid[coordinate][0]
             #Fix for if the output is given as input
-            if type( cubeData ) == VoxelPointInfo:
+            if isinstance( cubeData, VoxelPointInfo ):
                 cubeID = cubeData.id
+            elif isinstance( cubeData, tuple ):
+                cubeID = cubeData[0]
             else:
                 cubeID = cubeData
             cubeDepth = grid[coordinate][1]
@@ -257,7 +283,8 @@ def convertCoordinates( dictionaryName, minDepthLevel=0 ):
         #Calculate new coordinates
         P3DCoordinate = coordinate*2+addAmount
         newCoordinate = tuple( [P3DCoordinate.x, P3DCoordinate.y, P3DCoordinate.z] )
-        newDictionary[newCoordinate] = VoxelPointInfo( coordinateID )
+        #newDictionary[newCoordinate] = VoxelPointInfo( coordinateID )
+        newDictionary[newCoordinate] = ( coordinateID )
         
     return newDictionary
 
@@ -377,7 +404,8 @@ for relativeCoordinate in originalCoordinates:
     if not blockID:
         dictionaryFix.append( blockID )
     else:
-        dictionaryFix.append( VoxelPointInfo( blockID ) )
+        #dictionaryFix.append( VoxelPointInfo( blockID ) )
+        dictionaryFix.append( ( blockID ) )
     editDictionary( octreeData, dictionaryFix )
     
     #Fill extra values
@@ -406,14 +434,16 @@ for relativeCoordinate in originalCoordinates:
             #Temporary to make sure it doesn't happen
             counter += 1
             if counter > 100:
-                raise ValueError("infinite loop when grouping octree levels")
+                print "fail again"
+                break
+                #raise ValueError("infinite loop when grouping octree levels")
             
             #Get all values
             allValuesAtDepth = reduce( dict.__getitem__, dictionaryPath[:-1], octreeData )
             allPointValues = [allValuesAtDepth["Nodes"].get( coordinate, None ) for coordinate in octreeStructure]
             
             #Find if all 8 coordinates are the same
-            everythingIsPoint = all( x == allPointValues[0] for x in allPointValues )
+            everythingIsPoint = all( x == allPointValues[0] for x in allPointValues ) and isinstance( allPointValues[0], ( VoxelPointInfo, int, tuple ) )
             
             #Find current depth as to not group past the max amount
             currentDepth = allValuesAtDepth["Depth"]
@@ -469,6 +499,7 @@ def summariseLOD( dictionaryName ):
     return LODValue
  
 summariseLOD( octreeData )
+
 
 print "{}: Calculated level of detail".format( TimeOutput( st, time.time() ) )
 
@@ -527,32 +558,79 @@ def formatOctree( dictionaryValue, minDepthLevel, absoluteMinDepth=None, startin
     return allPoints
     
     
-newList = formatOctree( octreeData, minDepthLevel )
+newList = formatOctree( octreeData, minDepthLevel, 0 )
+len( newList )
 #newList = {}
 print "{}: Formatted octree into usable points".format( TimeOutput( st, time.time() ) )
 import zlib, base64, cPickle
-with open( "C:/test.txt", "w" ) as txt:
-    txt.write( cPickle.dumps( newList ) )
+
 
 if True:
+    instanceCubeList = {}
+    #instanceCubeList[id][size]
     for coordinates in newList.keys():
         blockData, depthLevel = newList[coordinates]
-        blockID = blockData.id
+        #blockID = blockData
+        try:
+            #blockID = blockData.id
+            blockID = blockData[0]
+        except:
+            blockID = blockData
+        
+        #Instancing is below
+        '''
+        #Check if exists
+        if instanceCubeList.get( blockID, None ) is None:
+            instanceCubeList[blockID] = {}
+        
+        try:
+            oldCube = instanceCubeList[blockID][depthLevel]
+        except KeyError:
+            oldCube = None
+        
+        #Check if it should create new block or instance old one
+        if isinstance( oldCube, pm.nodetypes.Transform ):
+            newCube = pm.instance( oldCube )[0]
+            
+        else:
+            
+            cubeSize = pow( 2, depthLevel )
+            newCube = pm.polyCube( h=cubeSize, w=cubeSize, d=cubeSize )[0]
+            
+            pm.addAttr( newCube, shortName = 'id', longName = "blockID" , attributeType = "byte" )
+            pm.setAttr( "{}.id".format( newCube ), blockID )
+            UVSize = cubeSize/pow( 2.0, minDepthLevel )
+            pm.polyEditUV( '{}.map[:]'.format( newCube ), su=UVSize*3, sv=UVSize*4 )
+            
+            instanceCubeList[blockID][depthLevel] = newCube
+            
+                
+        pm.move( newCube, coordinates )
+        '''
         cubeSize = pow( 2, depthLevel )
         newCube = pm.polyCube( h=cubeSize, w=cubeSize, d=cubeSize )[0]
+        
         pm.move( newCube, coordinates )
+        #instanceCubeList[blockID][depthLevel] = newCube
+        
         pm.addAttr( newCube, shortName = 'id', longName = "blockID" , attributeType = "byte" )
         pm.setAttr( "{}.id".format( newCube ), blockID )
         UVSize = cubeSize/pow( 2.0, minDepthLevel )
         pm.polyEditUV( '{}.map[:]'.format( newCube ), su=UVSize*3, sv=UVSize*4 )
 
+        
     print "{}: Drew cubes".format( TimeOutput( st, time.time() ) )
 
 inputLength = len( cPickle.dumps( grid ) )
 octreeLength = len( cPickle.dumps( octreeData ) )
+compressedLength = len( zlib.compress( cPickle.dumps( octreeData ) ) )
 print "Length of input:  {0}".format( inputLength )
 print "Length of octree: {0}".format( octreeLength )
 print "{0}% efficiency".format( round( float( inputLength )/octreeLength, 2 )*100 )
+print "{0}% compressed efficiency".format( round( float( inputLength )/compressedLength, 2 )*100 )
 print "Length of output:  {0}".format( len( cPickle.dumps( newList ) ) )
 print "Max depth: {0}".format( octreeData["Depth"] )
 
+
+with open( "C:/test.txt", "w" ) as txt:
+    txt.write( zlib.compress( cPickle.dumps( octreeData ) ) )
