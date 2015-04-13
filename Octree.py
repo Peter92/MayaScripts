@@ -5,9 +5,11 @@ Info
  
  - Point3D and Cube class from mkrieger
 
+ 
 To do:
  - Block ID defines UV rules
  - OctreeData["nodes"] = OctreeData["nodes"][anything]["nodes"]
+ - Keep list of created blocks and instance duplicates, assign shaders first
 '''
 from collections import namedtuple
 from codeStuff import TimeOutput
@@ -223,7 +225,7 @@ for chunk in regionData.get_metadata():   #or get_chunks
 print len( newList3 )
 
 '''
-grid = newList3
+#grid = grid2
 minDepthLevel = 0
 maxDepthGrouping = 100000
 
@@ -513,20 +515,11 @@ def formatOctree( dictionaryValue, minDepthLevel, absoluteMinDepth=None, startin
     cubeSize = pow( 2, currentDepth )
     depthMultiplier = pow( 2, currentDepth )
     
-    #Set value to reverse the original coordinate conversion
+    #Amount to move the cube, as the octree slightly distorts it
+    addAmount = -pow( 2, minDepthLevel-1 )
     if not currentDepth:
-        addAmount = 0
-    else:
-        if minDepthLevel > 0:
-            addAmount = -pow( 2, ( minDepthLevel-1 ) )
-        elif currentDepth > 0:
-            addAmount = -0.5
-        #Fix for everything being offset by 0.5 when min depth level is anything under 0
-        elif minDepthLevel < 0:
-            addAmount = -0.5
-        else:
-            addAmount = -pow( 2, minDepthLevel-1 )
-            
+        addAmount += 0.5
+    
     for coordinate in dictionaryValue["Nodes"]:
         nodeData = dictionaryValue["Nodes"].get( coordinate, 0 )
         
@@ -551,6 +544,7 @@ def formatOctree( dictionaryValue, minDepthLevel, absoluteMinDepth=None, startin
             
         #Add to list
         if valueID:
+            
             totalMovement = tuple( i/2+addAmount for i in newCoordinate )
             #totalMovement = tuple( i/2+addAmount*(1 if i<0 else 1) for i in newCoordinate )
             allPoints[totalMovement] = (valueID, currentDepth)
@@ -558,7 +552,7 @@ def formatOctree( dictionaryValue, minDepthLevel, absoluteMinDepth=None, startin
     return allPoints
     
     
-newList = formatOctree( octreeData, minDepthLevel, 0 )
+newList = formatOctree( octreeData, minDepthLevel )
 len( newList )
 #newList = {}
 print "{}: Formatted octree into usable points".format( TimeOutput( st, time.time() ) )
