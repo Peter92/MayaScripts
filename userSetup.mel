@@ -1,24 +1,19 @@
 //  Auto Save Script Editor:
-//      It will run every x seconds and save the contents in the script editor.
+//      The script editor tabs will be saved each time a save happens.
 //
-//      The only way to save the scripts involves highlighting everything, which
-//      can be inconvenient, so it will print a short countdown if silent mode
-//      isn't active.
-//      This is also why the interval is set to 120 seconds, as any less could get
-//      annoying.
-//  
+//      As it will not work if an autosave skips (eg. if the scene hasn't changed), I
+//      have added a function to disable the skipping. If you decide at any time you 
+//      want this feature back, just set $disable_autosave_skip to false and reload Maya.
+//    
 //      The script will also write backup files which will be deleted when Maya
-//      exists normally, so if something happens to go wrong when saving and a
-//      crash corrupts some scripts, there should be a backup in the folder you
-//      can rename.
+//      exists normally, so if a crash happens when saving and corrupts some
+//      scripts, there should be backup files in the folder.
+//
+//      The script editor files can be found here:
+//      C:/Users/(name)/Documents/Maya/(version)/prefs/scriptEditorTemp/
 
-$load_on_startup = true;        // If the backup should automatically run - true/false
+$disable_autosave_skip = true;   // Disable the 'Scene not changed - autosave skipped' message
 
-$silent_mode = "False";         // If messages should be disabled - "True"/"False"
-$autosave_interval = "20";      // How often it should save in seconds - 2 or above
-
-evalDeferred("python(\"from SEAutoSave import AutoSave\")");                            // Import module
-evalDeferred("python(\"AutoSave().silent(\"+$silent_mode+\")\")");                      // Change if messages are disabled
-if($load_on_startup){
-    evalDeferred("python(\"AutoSave().start(\"+$autosave_interval+\", 10, True)\")");   // Start thread
-}
+evalDeferred("python(\"from SEAutoSave import AutoSave, AutoSaveCallback\")");
+evalDeferred("python(\"AutoSaveCallback().register()\")");
+if($disable_autosave_skip){evalDeferred("python(\"AutoSaveCallback().registerUndo()\")");}
