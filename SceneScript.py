@@ -1,17 +1,25 @@
 import pymel.core as pm
 from maya import OpenMaya
 import cPickle, base64
+from maya.utils import executeInMainThreadWithResult as execute
+global callbackCommandObjects
+try:
+    callbackCommandObjects.keys()
+except:
+    callbackCommandObjects = {}
 class SceneScript(object):
     """Save scripts in the scene file."""
     
     dict_name = "scripts"
-    def __init__(self):
+    def __init__(self, **kwargs):
         """Initialise the dictionary."""
-        #Create dictionary
         if pm.fileInfo.get(self.dict_name, None) is None:
             self.reset()
         else:
             self.dict = self.decode(pm.fileInfo[self.dict_name])
+        #Add kwargs to dictionary
+        for k, v in kwargs.iteritems():
+            self.add(k, v)
     
     @classmethod
     def encode(self, input):
@@ -83,10 +91,11 @@ class SceneScript(object):
         
         SceneScript.remove(name):
             name (args): Names of the scripts to remove
+            all (kwargs['all']): If all scripts should be removed
         
-        >>> SceneScript().remove("MyScript")
-        
-        >>> SceneScript().remove("MyScript1", "MyScript2")
+        >>> SceneScript().remove('MyScript')
+        >>> SceneScript().remove('MyScript1', 'MyScript2')
+        >>> SceneScript().remove(all=True)
         """
         if kwargs.get('all', None):
             #Remove all scripts
@@ -143,10 +152,16 @@ class SceneScript(object):
         >>> SceneScript().run("MyScript", "test(10)", "test('c')")
         [50, 'ccccc']
         
+        Pass a variable to a function command
+        >>> SceneScript().run("MyScript", 'test(a+b)', a=10, b=-50)
+        [-200]
+        
         Execute a function without a return
-        >>> SceneScript().add("MyScript", "def test(x): y=x*5")
-        >>> SceneScript().run("MyScript", "test(10)")
-        [None]
+        >>> SceneScript().add("MyScript", "def test(x): print x*5")
+        >>> SceneScript().run("MyScript", "test(10)", "test('c')")
+        50
+        ccccc
+        [None, None]
         
         Pass a variable
         >>> SceneScript().add("MyScript", "print x")
@@ -168,3 +183,102 @@ class SceneScript(object):
                 all_outputs.append(new_globals['script_output'])
         if all_outputs:
             return all_outputs
+    
+    @classmethod
+    def _enclose(self, input):
+        """Enclose the input in quotations.
+        
+        >>> SceneScript._enclose("test")
+        "'test'"
+        
+        >>> SceneScript._enclose(["test1", 'test2', 100])
+        ["'test1'", "'test2'", '100']
+        """
+        
+        #Convert to list
+        was_list = True
+        if not isinstance(input, (list, tuple)):
+            input = [input]
+            was_list = False
+        input = list(input)
+        
+        #Iterate through each item
+        for i in range(len(input)):
+            word = input[i]
+            #Make sure it is a string, otherwise ignore
+            if isinstance( word, str ):
+                if word[0] == word[-1]:
+                    while word[0] in ("'", '"'):
+                        word = word[1:-1]
+                input[i] = "'"+word+"'"
+            else:
+                input[i] = str(word)
+        
+        #Get first element if it wasn't originally a list or tuple
+        if not was_list:
+            input = input[0]
+            
+        return input
+    
+    def addCallback(self, callbackID, script, *args, **kwargs):
+        """Add a script to run on an event.
+        
+        >>> SceneScript().add("MyScript", "def test(x): print x, 'scene saved'")
+        >>> test_callback = SceneScript().addCallback(OpenMaya.MSceneMessage.kAfterSave, "MyScript", "test(y)", y=100)
+        
+        Remove callback
+        >>> SceneScript()._del_callback( test_callback )
+        """
+        if not isinstance(callbackCommandObjects.get(script, None), list):
+            callbackCommandObjects[script] = []
+        
+        #Make sure all are enclosed in quotations
+        new_script = self._enclose(script)
+        str_values = self._enclose(script)
+        if args:
+            str_values += ', ' + self._enclose(*args)
+        if kwargs:
+            str_values += ', ' + ', '.join(k+'='+str(v) for k,v in kwargs.iteritems())
+        
+        #Register callback
+        callback_object = OpenMaya.MSceneMessage().addCallback( callbackID, self._callback_wrapper, str_values )
+        
+        #Write to dictionary
+        callbackCommandObjects[script].append(callback_object)
+        
+        return callback_object
+    
+    def removeCallback(self, script):
+        """Remove all callbacks relating to a script.
+        
+        >>> SceneScript().removeCallback("MyScript")
+        """
+        if callbackCommandObjects.get(script, None):
+            for i in range(len(callbackCommandObjects[script])):
+                self._del_callback(callbackCommandObjects[script][i])
+            del callbackCommandObjects[script]
+    
+    def removeAllCallbacks(self):
+        """Remove all custom callbacks.
+        
+        >>> SceneScript().removeAllCallbacks()
+        """
+        for script in callbackCommandObjects:
+            self.removeCallback(i)
+    
+    def _del_callback(self, PyCObject):
+        """Delete a callback object.
+        
+        Create PyCObject
+        >>> SceneScript().add("MyScript", "def test(x): print x, 'scene saved'")
+        >>> test_callback = SceneScript().addCallback(OpenMaya.MSceneMessage.kAfterSave, "MyScript", "test(y)", y=100)
+        
+        Remove callback
+        >>> SceneScript().removeCallback(test_callback)
+        """
+        OpenMaya.MSceneMessage().removeCallback( PyCObject )
+    
+    def _callback_wrapper(self, input, *args):
+        """Wrapper to unpack the args and kwargs."""
+        unpacked = "SceneScript().run({})".format(input)
+        exec(unpacked)
