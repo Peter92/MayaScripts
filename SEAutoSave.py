@@ -5,6 +5,7 @@ from maya.utils import executeInMainThreadWithResult as execute, executeDeferred
 import maya.mel as mel
 import os, time
 from os.path import isfile, join
+import maya.OpenMaya as om
 
 class SaveScriptError( Exception ):
     pass
@@ -96,7 +97,7 @@ class AutoSaveThread( object ):
                         
                     #If script editor window is closed (tabs don't exist)
                     except RuntimeError:
-                        printStuff( "Items don't exist (window is probably closed), trying again in {0} seconds.".format( interval ), AutoSave.printPrefix )
+                        printStuff( "Item doesn't exist (window is probably closed), trying again in {0} seconds.".format( interval ), AutoSave.printPrefix )
                         
                         #This shouldn't ever happen, but just in case, save the backup files from deletion
                         if onlySavedBackupFiles:
@@ -142,7 +143,8 @@ def printWrapper( input ):
 def printStuff( stuff, prefix='', suffix='' ):
     """Print function to use the wrapper."""
     if not pm.optionVar[AutoSave.printName]:
-        deferred( printWrapper, str( prefix )+str( stuff )+str( suffix ) )
+        currentTime = time.strftime('[%H:%M:%S] ', time.localtime(time.time()))
+        execute( printWrapper, '// '+str( currentTime )+str( prefix )+str( stuff )+str( suffix ) )
 
 
 def saveScriptEditorFiles( backup=False, saveLocation=None ):
@@ -452,7 +454,127 @@ class AutoSave:
         """Quick reset of the values using self.clear()."""
         self.clear( True )
         
+        
+    def quickSave( self, interval=None ):
+        """
+        Manually save the files.
+        A little messy currently as it's just copied and pasted from the threaded version.
+        """
+        
+        scriptLocation = execute( self.location )
+        
+        #Attempt to save
+        onlySavedBackupFiles = False
+        printStuff( "Saving scripts... Do not open or close the script editor during this time.", self.printPrefix )
+        execute( saveScriptEditorFiles, True, scriptLocation )
+        try:
+            execute( saveScriptEditorFiles, True, scriptLocation )    #Backup files first
+            onlySavedBackupFiles = True
+            execute( saveScriptEditorFiles, False, scriptLocation )   #Overwrite main files
+            onlySavedBackupFiles = False
+            
+        #If script editor window is closed (tabs don't exist)
+        except RuntimeError:
+            printMessage = "Item doesn't exist (window is probably closed)."
+            if interval: 
+                printMessage = printMessage[:-1]+", trying again in {0} seconds.".format( interval )
+            printStuff( printMessage, self.printPrefix )
+            
+            #This shouldn't ever happen, but just in case, save the backup files from deletion
+            if onlySavedBackupFiles:
+                MoveBackupScriptsToFolder( scriptLocation )
+                moveLocation = scriptLocation+'/scriptEditorTemp/{0}'.format( time.time() )
+                printStuff( "Normal files may have become corrupted so backup files have been moved into '{0}'.".format( moveLocation ), self.printPrefix )
+        
+        #If file is read only
+        except WindowsError:
+            printStuff( "Failed to save scripts, one or more of the files is read only.", self.printPrefix )
+        
+        #If saving is disabled
+        except SaveScriptError:
+            printStuff( "Saving to the script editor is not enabled, type 'pm.optionVar['saveActionsScriptEditor']=1' to enable.", self.printPrefix )
+        
+        #Other unknown error
+        except:
+            #This also shouldn't happen
+            printStuff( "Failed to save scripts for unknown reason, if it keeps happening please let me know.", self.printPrefix )
+        
+        #Successful save
+        else:
+            printMessage = "Successfully saved scripts."
+            if interval: 
+                printMessage = printMessage[:-1]+", saving again in {0} seconds.".format( interval )
+            printStuff( printMessage, self.printPrefix )
+        
 
+class AutoSaveCallback:
+    """
+    Temporary class to link saveScriptEditorFiles to the saving callbacks.
+    """
+    
+    @classmethod
+    def save( self, backup ):
+        """Save the files, and output the result."""
+                
+        #Attempt to save
+        if backup:
+            printStuff( "Backing up script editor...", AutoSave.printPrefix )
+        else:
+            printStuff( "Saving main script files...", AutoSave.printPrefix )
+            
+        try:
+            execute( saveScriptEditorFiles, backup, AutoSave().location() )
+            
+        #If script editor window is closed (tabs don't exist)
+        except RuntimeError:
+            if not backup:
+            printStuff( "Item doesn't exist (window is probably closed).", AutoSave.printPrefix )
+            
+        #If file is read only
+        except WindowsError:
+            printStuff( "Failed to save scripts, one or more of the files is read only.", AutoSave.printPrefix )
+        
+        #If saving is disabled
+        except SaveScriptError:
+            if backup:   #Only write this once
+                printStuff( "Saving script editor contents is disabled, enable it in the preferences to allow auto saving.", AutoSave.printPrefix )
+        
+        #Other unknown error
+        except Exception as e:
+            printStuff( "Failed to save scripts for unknown reason ({}), tell me if you see this message.".format( e.message ), AutoSave.printPrefix )
+        
+        #Successful save
+        else:
+            if not backup:
+                printStuff( "Successfully saved scripts.", AutoSave.printPrefix )
+    
+    @classmethod
+    def causeUndo(self):
+        """Create a node then delete it, to mark the scene as 'changed' and force the autosaving."""
+        tempNode = pm.createNode('unknown', n='SEAutoSaveTemp')
+        pm.delete( tempNode )
+        
+    @classmethod
+    def deferredCauseUndo(self, *args):
+        """Wrapper for causeUndo()"""
+        deferred( self.causeUndo )
+        
+    @classmethod
+    def register(self):
+        """Register callbacks for the save events."""
+        om.MSceneMessage().addCallback( om.MSceneMessage.kBeforeExport, self.save, True )
+        om.MSceneMessage().addCallback( om.MSceneMessage.kBeforeSave, self.save, True )
+        om.MSceneMessage().addCallback( om.MSceneMessage.kAfterExport, self.save, False )
+        om.MSceneMessage().addCallback( om.MSceneMessage.kAfterSave, self.save, False )
+    
+    def registerUndo(self):
+        """Register callbacks for forcing autosaves with deferredCauseUndo()."""
+        self.deferredCauseUndo()
+        om.MSceneMessage().addCallback( om.MSceneMessage.kAfterOpen, self.deferredCauseUndo, 'kAfterOpen' )
+        om.MSceneMessage().addCallback( om.MSceneMessage.kAfterNew, self.deferredCauseUndo, 'kAfterNew' )
+        om.MSceneMessage().addCallback( om.MSceneMessage.kMayaInitialized, self.deferredCauseUndo, 'kMayaInitialized' )
+        om.MSceneMessage().addCallback( om.MSceneMessage.kAfterSave, self.deferredCauseUndo, 'kAfterSave' )
+        
 #Reset progress in case it wasn't properly stopped on previous run
 if firstRun:
     AutoSave().progress(False)
