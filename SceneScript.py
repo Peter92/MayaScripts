@@ -1,26 +1,70 @@
 import pymel.core as pm
 from maya import OpenMaya
-import cPickle, base64
+import cPickle, base64, re
 from maya.utils import executeInMainThreadWithResult as execute
 global callbackCommandObjects
+first_run = False
 try:
     callbackCommandObjects.keys()
 except:
     callbackCommandObjects = {}
+    first_run = True
+    
+def get_unique_id(f_name):
+    """Randomly generate ID for computer."""
+    try:
+        with open(f_name, 'r') as f:
+            id = str(f.read())
+        if len(id) == 64:
+            return id
+        else:
+            raise IOError("id format not valid")
+    except IOError:
+        import os, binascii
+        with open(f_name, 'w') as f:
+            id = binascii.hexlify(os.urandom(32))
+            f.write(id)
+        return get_unique_id(f_name)
+        
 class SceneScript(object):
     """Save scripts in the scene file."""
 
     dict_name = "scripts"
     def __init__(self, **kwargs):
         """Initialise the dictionary."""
+        
+        #Set variables to default values if fileInfo record doesn't exist
         if pm.fileInfo.get(self.dict_name, None) is None:
             self.reset()
         else:
             self.dict = self.decode(pm.fileInfo[self.dict_name])
+            
         #Add kwargs to dictionary
         for k, v in kwargs.iteritems():
             self.add(k, v)
     
+    def registerSceneCallbacks(self, *args):
+        """
+        Automatically register stored callbacks. 
+        Set this command to run when the scene loads.
+        """
+        #Remove all callbacks created by code before registering more
+        self.unregisterAllCallbacks(self)
+        
+        #Update dictionary since it will belong to old scene
+        self.dict = SceneScript().dict
+        
+        #Iterate through all items and add as callback
+        if self.dict.get('callbacks', None):
+            for script in self.dict['callbacks']:
+                if self.dict['callbacks'].get(script, None):
+                    for id in self.dict['callbacks'][script]:
+                        self._str_callback(script, id)
+                        
+    @classmethod
+    def UID(self):
+        return get_unique_id('SceneScripts.uid')
+            
     @classmethod
     def encode(self, input):
         """Encode an input.
@@ -110,15 +154,6 @@ class SceneScript(object):
                     del self.dict['script'][str(i)]
             self._encode_dict()
     
-    def scripts(self):
-        """Return a list of scripts.
-        
-        >>> SceneScript().add("MyScript", "print 5")
-        >>> SceneScript().scripts()
-        ['MyScript']
-        """
-        return self.dict['script'].keys()
-    
     def __getitem__(self, script):
         """Return the code for a script.
         
@@ -174,8 +209,12 @@ class SceneScript(object):
         all_outputs = []
         for i in args:
             if i:
-                exec('script_output='+str(i), new_globals)
-                all_outputs.append(new_globals['script_output'])
+                try:
+                    exec('script_output='+str(i), new_globals)
+                    all_outputs.append(new_globals['script_output'])
+                #SyntaxError if it won't return a value, eg. script_output=print 5
+                except SyntaxError:
+                    exec(str(i), new_globals)
         if all_outputs:
             return all_outputs
     
@@ -215,53 +254,170 @@ class SceneScript(object):
             
         return input
     
-    def addCallback(self, callbackID, script, *args, **kwargs):
-        """Add a script to run on an event.
+    
+    
+    
+    def removeOwnership(self, script=None, callbackID=None):
+        """Remove ownership of callbacks, which will stop them activating.
+        Leave empty for all, or specify which ones.
         
+        SceneScript().removeOwnership(script, callbackID)
+            script: Names of scripts to deactivate (optional)
+            callbackID: IDs of callbacks for a script (optional)
+            
+        Create PyCObject
         >>> SceneScript().add("MyScript", "def test(x): print x, 'scene saved'")
+        >>> test_callback = SceneScript().addCallback(OpenMaya.MSceneMessage.kAfterSave, "MyScript", "test(10)")
+        
+        Remove ownsership
+        >>> SceneScript().removeOwnership('MyScript')
+        """
+        self.claimOwnership(script, callbackID, unregister=True)
+    
+    def claimOwnership(self, script=None, callbackID=None, **kwargs):
+        """Claim ownership of callbacks, which is needed to activate them.
+        Leave empty for all, or specify which ones.
+        
+        SceneScript().claimOwnership(script, callbackID)
+            script: Names of scripts to activate (optional)
+            callbackID: IDs of callbacks for a script (optional)
+        
+        Create unregistered PyCObject
+        >>> SceneScript().add("MyScript", "def test(x): print x, 'scene saved'")
+        >>> test_callback = SceneScript().addCallback(OpenMaya.MSceneMessage.kAfterSave, "MyScript", "test(10)", register=False)
+        
+        Claim ownership
+        >>> SceneScript().claimOwnership()
+        """
+        
+        #What to set ID to
+        if kwargs.get('unregister', None):
+            userID = None
+        else:
+            userID = SceneScript.UID()
+        
+        #Build script name list, if empty build with all values
+        if script is None:
+            listOfScripts = self.dict['callbacks'].keys()
+        elif not isinstance(script, (list, tuple)):
+            listOfScripts = [script]
+        
+        #Build ID list
+        if callbackID is None:
+            pass
+        elif not isinstance(callbackID, (list, tuple)):
+            listOfIDs = [callbackID]
+            
+        for script in listOfScripts:
+            
+            #If ID is empty, build it with all values
+            if callbackID is None:
+                listOfIDs = self.dict['callbacks'][script].keys()
+            
+            #Iterate through all the IDs and set user ID
+            for id in listOfIDs:
+                self.dict['callbacks'][script][id][2] = userID
+                
+        self._encode_dict()
+        
+    
+                        
+    
+    def _str_callback(self, script, id):
+        """Wrapper for if the callback information is in the correct format."""
+        #script = args[1].split(',')[0][1:-1]
+        if script in self.dict['script']:
+            self._reg_callback(script, id)
+    
+    def _reg_callback(self, script, id):
+        """Register a callback matching the script and ID."""
+        
+        callback_data = self.dict['callbacks'][script][id]
+        
+        #Make sure session dictionary is a dictionary
+        if not isinstance(callbackCommandObjects.get(script, None), dict):
+            callbackCommandObjects[script] = {}
+        
+        if SceneScript.UID() == callback_data[2]:
+            
+            self.unregisterCallback(script, id)
+            '''
+            #Remove existing callback if exists
+            if callbackCommandObjects[script].get(id) is not None:
+                self._del_callback(callbackCommandObjects[script][id])
+                del callbackCommandObjects[script][id]
+                '''
+            if callbackCommandObjects.get(script) is None:
+                callbackCommandObjects[script] = {}
+                
+            #Register callback
+            callback_object = OpenMaya.MSceneMessage().addCallback(callback_data[0], self._callback_wrapper, callback_data[1])
+            
+            #Write to session dictionary
+            callbackCommandObjects[script][id] = callback_object
+            
+            return callback_object
+        
+    
+    def addCallback(self, callbackID, script, *args, **kwargs):
+        """Add a callback to the scene store.
+        Use 'register=False' to stop the script automatically calling when the scene loads.
+        
+        Add script
+        >>> SceneScript().add("MyScript", "def test(x): print x, 'scene saved'")
+        
+        Register as callback
         >>> test_callback = SceneScript().addCallback(OpenMaya.MSceneMessage.kAfterSave, "MyScript", "test(y)", y=100)
         
         Remove callback
-        >>> SceneScript()._del_callback( test_callback )
+        >>> SceneScript()._del_callback(test_callback)
         """
+        
         if script in self.dict['script']:
             
+            #Get user ID
+            if kwargs.get('register') == False:
+                userID = None
+            else:
+                userID = SceneScript.UID()
+            try:
+                del kwargs['register']
+            except KeyError:
+                pass
+                
             #Make sure all are enclosed in quotations
             str_values = self._enclose(script)
-            print args
             if args:
                 str_values += ', ' + ', '.join(self._enclose(args))
             if kwargs:
                 str_values += ', ' + ', '.join(k+'='+str(v) for k,v in kwargs.iteritems())
             
-            #Write to self.dict
-            if not isinstance(callbackCommandObjects.get(script, None), dict):
-                callbackCommandObjects[script] = {}
+            #Get next script ID
             if not isinstance( self.dict['callbacks'].get(script, None), dict):
                 self.dict['callbacks'][script] = {}
             try:
                 newID = max(self.dict['callbacks'][script].keys())+1
             except ValueError:
                 newID = 0
-            self.dict['callbacks'][script][newID] = [callbackID, str_values]
+            
+                
+            self.dict['callbacks'][script][newID] = [callbackID, str_values, userID]
             self._encode_dict()
             
             #Register callback
-            callback_object = OpenMaya.MSceneMessage().addCallback(callbackID, self._callback_wrapper, str_values)
+            callbackData = self._reg_callback(script, newID)
+            return callbackData
             
-            #Write to session dictionary callbackCommandObjects = {}
-            callbackCommandObjects[script][newID] = callback_object
-            
-            return callback_object
         else:
             raise KeyError("script name '{}' doesn't exist".format(script))
     
-    def removeCallback(self, script, callbackID=None):
-        """Remove all callbacks relating to a script.
+    def unregisterCallback(self, script, callbackID=None):
+        """Unregister callback, but do not delete from stored information.
         Skip if element doesn't exist.
         
-        >>> SceneScript().removeCallback("MyScript")
+        >>> SceneScript().unregisterCallback("MyScript")
         """
+        
         #Remove stored callback
         if callbackCommandObjects.get(script, None):
             callbackIDs = callbackCommandObjects[script].keys()
@@ -271,11 +427,21 @@ class SceneScript(object):
                 try:
                     self._del_callback(callbackCommandObjects[script][i])
                     del callbackCommandObjects[script][i]
-                except RuntimeError:
+                except (RuntimeError, KeyError):
                     pass
             #Remove listing if it contains nothing
             if not callbackCommandObjects[script].keys():
                 del callbackCommandObjects[script]
+        
+    
+    def removeCallback(self, script, callbackID=None):
+        """Remove all callbacks relating to a script.
+        Skip if element doesn't exist.
+        
+        >>> SceneScript().removeCallback("MyScript")
+        """
+        
+        self.unregisterCallback(script, callbackID)
         
         #Delete callback info from stored list
         if self.dict['callbacks'].get(script):
@@ -287,6 +453,12 @@ class SceneScript(object):
                 del self.dict['callbacks'][script]
             self._encode_dict()
     
+    def unregisterAllCallbacks(self, *args):
+        """Unregister all custom callbacks."""
+        allCallbacks = callbackCommandObjects.copy()
+        for script in allCallbacks:
+            self.unregisterCallback(script)
+    
     def removeAllCallbacks(self):
         """Remove all custom callbacks.
         
@@ -296,6 +468,7 @@ class SceneScript(object):
         for script in allCallbacks:
             self.removeCallback(script)
         self.dict['callbacks'] = {}
+        self._encode_dict()
     
     def _del_callback(self, PyCObject):
         """Delete a callback object.
@@ -310,86 +483,106 @@ class SceneScript(object):
         OpenMaya.MSceneMessage().removeCallback(PyCObject)
     
     def _callback_wrapper(self, input, *args):
-        """Wrapper to unpack the args and kwargs."""
+        """Wrapper to unpack the args and kwargs from a string."""
         unpacked = "SceneScript().run({})".format(input)
         exec(unpacked)
     
     def _callback_list(self):
         """Build dictionary of callback commands."""
         allCallbacks = {}
-        allCallbacks[0] = 'SceneUpdate'
-        allCallbacks[1] = 'BeforeNew'
-        allCallbacks[2] = 'AfterNew'
-        allCallbacks[3] = 'BeforeImport'
-        allCallbacks[4] = 'AfterImport'
-        allCallbacks[5] = 'BeforeOpen'
-        allCallbacks[6] = 'AfterOpen'
-        allCallbacks[7] = 'BeforeFileRead'
-        allCallbacks[8] = 'AfterFileRead'
-        allCallbacks[9] = 'BeforeExport'
-        allCallbacks[10] = 'AfterExport'
-        allCallbacks[11] = 'BeforeSave'
-        allCallbacks[12] = 'AfterSave'
-        allCallbacks[13] = 'BeforeReference'
-        allCallbacks[14] = 'AfterReference'
-        allCallbacks[15] = 'BeforeRemoveReference'
-        allCallbacks[16] = 'AfterRemoveReference'
-        allCallbacks[17] = 'BeforeImportReference'
-        allCallbacks[18] = 'AfterImportReference'
-        allCallbacks[19] = 'BeforeExportReference'
-        allCallbacks[20] = 'AfterExportReference'
-        allCallbacks[21] = 'BeforeUnloadReference'
-        allCallbacks[22] = 'AfterUnloadReference'
-        allCallbacks[23] = 'BeforeSoftwareRender'
-        allCallbacks[24] = 'AfterSoftwareRender'
-        allCallbacks[25] = 'BeforeSoftwareFrameRender'
-        allCallbacks[26] = 'AfterSoftwareFrameRender'
-        allCallbacks[27] = 'SoftwareRenderInterrupted'
-        allCallbacks[28] = 'MayaInitialized'
-        allCallbacks[29] = 'MayaExiting'
-        allCallbacks[30] = 'BeforeNewCheck'
-        allCallbacks[31] = 'BeforeOpenCheck'
-        allCallbacks[32] = 'BeforeSaveCheck'
-        allCallbacks[33] = 'BeforeImportCheck'
-        allCallbacks[34] = 'BeforeExportCheck'
-        allCallbacks[35] = 'BeforeLoadReference'
-        allCallbacks[36] = 'AfterLoadReference'
-        allCallbacks[37] = 'BeforeLoadReferenceCheck'
-        allCallbacks[38] = 'BeforeReferenceCheck'
-        allCallbacks[39] = 'BeforePluginLoad'
-        allCallbacks[40] = 'AfterPluginLoad'
-        allCallbacks[41] = 'BeforePluginUnload'
-        allCallbacks[42] = 'AfterPluginUnload'
-        allCallbacks[43] = 'BeforeCreateReference'
-        allCallbacks[44] = 'AfterCreateReference'
-        allCallbacks[45] = 'ExportStarted'
-        allCallbacks[46] = 'BeforeLoadReferenceAndRecordEdits'
-        allCallbacks[47] = 'AfterLoadReferenceAndRecordEdits'
-        allCallbacks[48] = 'BeforeCreateReferenceAndRecordEdits'
-        allCallbacks[49] = 'AfterCreateReferenceAndRecordEdits'
-        allCallbacks[50] = 'Last'
+        allCallbacks[0] = 'kSceneUpdate'
+        allCallbacks[1] = 'kBeforeNew'
+        allCallbacks[2] = 'kAfterNew'
+        allCallbacks[3] = 'kBeforeImport'
+        allCallbacks[4] = 'kAfterImport'
+        allCallbacks[5] = 'kBeforeOpen'
+        allCallbacks[6] = 'kAfterOpen'
+        allCallbacks[7] = 'kBeforeFileRead'
+        allCallbacks[8] = 'kAfterFileRead'
+        allCallbacks[9] = 'kBeforeExport'
+        allCallbacks[10] = 'kAfterExport'
+        allCallbacks[11] = 'kBeforeSave'
+        allCallbacks[12] = 'kAfterSave'
+        allCallbacks[13] = 'kBeforeReference'
+        allCallbacks[14] = 'kAfterReference'
+        allCallbacks[15] = 'kBeforeRemoveReference'
+        allCallbacks[16] = 'kAfterRemoveReference'
+        allCallbacks[17] = 'kBeforeImportReference'
+        allCallbacks[18] = 'kAfterImportReference'
+        allCallbacks[19] = 'kBeforeExportReference'
+        allCallbacks[20] = 'kAfterExportReference'
+        allCallbacks[21] = 'kBeforeUnloadReference'
+        allCallbacks[22] = 'kAfterUnloadReference'
+        allCallbacks[23] = 'kBeforeSoftwareRender'
+        allCallbacks[24] = 'kAfterSoftwareRender'
+        allCallbacks[25] = 'kBeforeSoftwareFrameRender'
+        allCallbacks[26] = 'kAfterSoftwareFrameRender'
+        allCallbacks[27] = 'kSoftwareRenderInterrupted'
+        allCallbacks[28] = 'kMayaInitialized'
+        allCallbacks[29] = 'kMayaExiting'
+        allCallbacks[30] = 'kBeforeNewCheck'
+        allCallbacks[31] = 'kBeforeOpenCheck'
+        allCallbacks[32] = 'kBeforeSaveCheck'
+        allCallbacks[33] = 'kBeforeImportCheck'
+        allCallbacks[34] = 'kBeforeExportCheck'
+        allCallbacks[35] = 'kBeforeLoadReference'
+        allCallbacks[36] = 'kAfterLoadReference'
+        allCallbacks[37] = 'kBeforeLoadReferenceCheck'
+        allCallbacks[38] = 'kBeforeReferenceCheck'
+        allCallbacks[39] = 'kBeforePluginLoad'
+        allCallbacks[40] = 'kAfterPluginLoad'
+        allCallbacks[41] = 'kBeforePluginUnload'
+        allCallbacks[42] = 'kAfterPluginUnload'
+        allCallbacks[43] = 'kBeforeCreateReference'
+        allCallbacks[44] = 'kAfterCreateReference'
+        allCallbacks[45] = 'kExportStarted'
+        allCallbacks[46] = 'kBeforeLoadReferenceAndRecordEdits'
+        allCallbacks[47] = 'kAfterLoadReferenceAndRecordEdits'
+        allCallbacks[48] = 'kBeforeCreateReferenceAndRecordEdits'
+        allCallbacks[49] = 'kAfterCreateReferenceAndRecordEdits'
+        allCallbacks[50] = 'kLast'
         return allCallbacks
     
     def listCallbacks(self):
+        """Print a list of all usable callback commands."""
+        allCallbacks = self._callback_list()
+        for i in allCallbacks:
+            print "{}: {}".format(i, allCallbacks[i])
+    
+    def convertCallbackID(self, ID):
+        """Return the name of a callback ID.
+        
+        >>> SceneScript().convertCallbackID(5)
+        'kBeforeOpen'
+        """
+        return self._callback_list()[ID]
+    
+    def scripts(self, *args):
         """Print the contents stored in the file."""
         allCallbacks = self._callback_list()
         for script in self.dict['callbacks']:
             print "{}:".format(script)
             #Print the script contents
-            print "  Script:"
-            print "    {}".format(self.get(script).replace("\n","\n    "))
+            print "  Script: {}".format(('\n'+self.get(script)).replace("\n","\n    >>> "))
             #Print the script callbacks
             if self.dict['callbacks'][script]:
                 print "  Callbacks:"
                 for id in self.dict['callbacks'][script]:
                     contents=self.dict['callbacks'][script][id]
                     print "    ID {}:".format(id)
-                    print "      Callback: {} ({})".format(contents[0], self.convertCallbackID(contents[0]))
+                    if contents[2] != SceneScript.UID() and False:
+                        contents[2] = str(contents[2])
+                        contents[2] += " (no match - will not register callback)"
+                    print "      User ID: {}".format(contents[2])
+                    if contents[2] != SceneScript.UID():
+                        print "        - Warning: will not register callback, ID doesn't match"
+                    callbackName = ' '.join(re.findall('[A-Z][a-z]*', allCallbacks[contents[0]]))
+                    print "      Callback {}: {}".format(contents[0], callbackName)
                     args_kwargs = contents[1].split(", ")
                     args = []
                     kwargs = []
                     #Separate args and kwargs
-                    for i in args_kwargs:
+                    for i in args_kwargs[1:]:
                         is_arg = True
                         for letter in i:
                             if letter in ("'",'"'):
@@ -405,7 +598,12 @@ class SceneScript(object):
                         print "      Commands: {}".format(", ".join(args))
                     if kwargs:
                         print "      Variables: {}".format(", ".join(kwargs))
-    
-    def convertCallbackID(self, ID):
-        """Return the name of a callback ID."""
-        return self._callback_list()[ID]
+        print "Personal ID: {}".format(SceneScript.UID())
+
+if first_run:
+    OpenMaya.MSceneMessage().addCallback(OpenMaya.MSceneMessage.kBeforeOpen, SceneScript().unregisterAllCallbacks)
+    OpenMaya.MSceneMessage().addCallback(OpenMaya.MSceneMessage.kBeforeNew, SceneScript().unregisterAllCallbacks)
+    OpenMaya.MSceneMessage().addCallback(OpenMaya.MSceneMessage.kMayaExiting, SceneScript().unregisterAllCallbacks)
+    OpenMaya.MSceneMessage().addCallback(OpenMaya.MSceneMessage.kMayaInitialized, SceneScript().registerSceneCallbacks)
+    OpenMaya.MSceneMessage().addCallback(OpenMaya.MSceneMessage.kAfterOpen, SceneScript().registerSceneCallbacks)
+    OpenMaya.MSceneMessage().addCallback(OpenMaya.MSceneMessage.kAfterNew, SceneScript().registerSceneCallbacks)
