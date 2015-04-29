@@ -100,11 +100,9 @@ class SceneScript(object):
         
         Stored information is an encoded empty dictionary
         >>> SceneScript.decode(pm.fileInfo[SceneScript.dict_name])
-        {'callbacks': {}, 'script': {}}
+        {}
         """
         self.dict = {}
-        self.dict['script'] = {}
-        self.dict['callbacks'] = {}
         self.removeAllCallbacks()
         self._encode_dict()
         
@@ -130,7 +128,9 @@ class SceneScript(object):
         
         >>> SceneScript().add("MyScript", "print 5")
         """
-        self.dict['script'][str(name)] = str(script)
+        if str(name) not in self.dict:
+            self.dict[str(name)] = {}
+        self.dict[str(name)]['script'] = str(script)
         self._encode_dict()
         
     def remove(self, *args, **kwargs):
@@ -144,16 +144,52 @@ class SceneScript(object):
         >>> SceneScript().remove('MyScript1', 'MyScript2')
         >>> SceneScript().remove(all=True)
         """
+        
         if kwargs.get('all', None):
             #Remove all scripts
             self.reset()
+            
         else:
             #Remove individual scripts
             for i in args:
-                if self.dict['script'].get(str(i), None) is not None:
-                    del self.dict['script'][str(i)]
+                if self.dict.get(str(i), None) is not None:
+                    self.removeCallback(str(i))
+                    del self.dict[str(i)]
             self._encode_dict()
     
+    def rename(self, original, new):
+        """Rename a script.
+        Will only run if the original name exists and new name doesnt.
+        Returns True if something was renamed, False otherwise.
+        
+        SceneScript().rename(original_name, new_name)
+            original_name: Name of the script to rename
+            new_name: Name to change it to
+        
+        
+        >>> SceneScript().add("MyScript", "print 5")
+        >>> print SceneScript().keys()
+        ['MyScript']
+        
+        >>> SceneScript().rename('MyScript', 'MyNewScript')
+        True
+        
+        >>> print SceneScript().keys()
+        ['MyNewScript']
+        
+        >>> SceneScript().rename('MyScript', 'MyNewScript')
+        False
+        """
+        if original in self.dict and new not in self.dict:
+            self.dict[str(new)] = self.dict[original]
+            del self.dict[original]
+            self._encode_dict()
+            return True
+        return False
+    
+    def keys(self):
+        return self.dict.keys()
+        
     def __getitem__(self, script):
         """Return the code for a script.
         
@@ -161,7 +197,7 @@ class SceneScript(object):
         >>> SceneScript()["MyScript"]
         'print 5'
         """
-        return self.dict['script'][script]
+        return self.dict[script]['script']
     get = __getitem__
     
     def run(self, script, *args, **kwargs):
@@ -203,7 +239,7 @@ class SceneScript(object):
         new_globals.update(kwargs)
         
         #Run the code
-        exec(self.dict['script'][script], new_globals)
+        exec(self.dict[script]['script'], new_globals)
         
         #Run individual commands and append outputs to a list
         all_outputs = []
@@ -290,17 +326,19 @@ class SceneScript(object):
         >>> SceneScript().claimOwnership()
         """
         
+        
         #What to set ID to
         if kwargs.get('unregister', None):
             userID = None
         else:
             userID = SceneScript.UID()
         
-        #Build script name list, if empty build with all values
+        #Build list of scripts to register ownership
         if script is None:
-            listOfScripts = self.dict['callbacks'].keys()
+            listOfScripts = self.dict.keys()
         elif not isinstance(script, (list, tuple)):
             listOfScripts = [script]
+            
         
         #Build ID list
         if callbackID is None:
@@ -309,30 +347,33 @@ class SceneScript(object):
             listOfIDs = [callbackID]
             
         for script in listOfScripts:
-            
-            #If ID is empty, build it with all values
-            if callbackID is None:
-                listOfIDs = self.dict['callbacks'][script].keys()
-            
-            #Iterate through all the IDs and set user ID
-            for id in listOfIDs:
-                self.dict['callbacks'][script][id][2] = userID
+            if self.dict.get(script, None):
+                
+                #If ID is empty, build it with all values
+                if callbackID is None:
+                    if self.dict[script].get('callbacks', None):
+                        listOfIDs = self.dict[script]['callbacks'].keys()
+                    else:
+                        listOfIDs = []
+                
+                #Iterate through all the IDs and set user ID
+                for id in listOfIDs:
+                    self.dict[script]['callbacks'][id][2] = userID
                 
         self._encode_dict()
-        
     
                         
     
     def _str_callback(self, script, id):
         """Wrapper for if the callback information is in the correct format."""
-        #script = args[1].split(',')[0][1:-1]
-        if script in self.dict['script']:
+        
+        if script in self.dict:
             self._reg_callback(script, id)
     
     def _reg_callback(self, script, id):
         """Register a callback matching the script and ID."""
         
-        callback_data = self.dict['callbacks'][script][id]
+        callback_data = self.dict[script]['callbacks'][id]
         
         #Make sure session dictionary is a dictionary
         if not isinstance(callbackCommandObjects.get(script, None), dict):
@@ -373,7 +414,7 @@ class SceneScript(object):
         >>> SceneScript()._del_callback(test_callback)
         """
         
-        if script in self.dict['script']:
+        if script in self.dict:
             
             #Get user ID
             if kwargs.get('register') == False:
@@ -393,15 +434,15 @@ class SceneScript(object):
                 str_values += ', ' + ', '.join(k+'='+str(v) for k,v in kwargs.iteritems())
             
             #Get next script ID
-            if not isinstance( self.dict['callbacks'].get(script, None), dict):
-                self.dict['callbacks'][script] = {}
+            if not isinstance( self.dict[script].get('callbacks', None), dict):
+                self.dict[script]['callbacks'] = {}
             try:
-                newID = max(self.dict['callbacks'][script].keys())+1
+                newID = max(self.dict[script]['callbacks'].keys())+1
             except ValueError:
                 newID = 0
             
                 
-            self.dict['callbacks'][script][newID] = [callbackID, str_values, userID]
+            self.dict[script]['callbacks'][newID] = [callbackID, str_values, userID]
             self._encode_dict()
             
             #Register callback
@@ -444,14 +485,15 @@ class SceneScript(object):
         self.unregisterCallback(script, callbackID)
         
         #Delete callback info from stored list
-        if self.dict['callbacks'].get(script):
-            #Remove an individual ID
-            if callbackID is not None and self.dict['callbacks'][script]:
-                del self.dict['callbacks'][script][callbackID]
-            #Delete everything relating to a script
-            elif callbackID is None:
-                del self.dict['callbacks'][script]
-            self._encode_dict()
+        if self.dict.get(script, None):
+            if self.dict[script].get('callbacks', None):
+                #Remove an individual ID
+                if callbackID is not None and self.dict[script]['callbacks']:
+                    del self.dict[script]['callbacks'][callbackID]
+                #Delete everything relating to a script
+                elif callbackID is None:
+                    del self.dict[script]['callbacks']
+                self._encode_dict()
     
     def unregisterAllCallbacks(self, *args):
         """Unregister all custom callbacks."""
@@ -467,7 +509,8 @@ class SceneScript(object):
         allCallbacks = callbackCommandObjects.copy()
         for script in allCallbacks:
             self.removeCallback(script)
-        self.dict['callbacks'] = {}
+        for script in self.dict:
+            self.dict[script]['callbacks'] = {}
         self._encode_dict()
     
     def _del_callback(self, PyCObject):
@@ -560,45 +603,47 @@ class SceneScript(object):
     def scripts(self, *args):
         """Print the contents stored in the file."""
         allCallbacks = self._callback_list()
-        for script in self.dict['callbacks']:
+        for script in self.dict:
             print "{}:".format(script)
             #Print the script contents
-            print "  Script: {}".format(('\n'+self.get(script)).replace("\n","\n    >>> "))
-            #Print the script callbacks
-            if self.dict['callbacks'][script]:
-                print "  Callbacks:"
-                for id in self.dict['callbacks'][script]:
-                    contents=self.dict['callbacks'][script][id]
-                    print "    ID {}:".format(id)
-                    if contents[2] != SceneScript.UID() and False:
-                        contents[2] = str(contents[2])
-                        contents[2] += " (no match - will not register callback)"
-                    print "      User ID: {}".format(contents[2])
-                    if contents[2] != SceneScript.UID():
-                        print "        - Warning: will not register callback, ID doesn't match"
-                    callbackName = ' '.join(re.findall('[A-Z][a-z]*', allCallbacks[contents[0]]))
-                    print "      Callback {}: {}".format(contents[0], callbackName)
-                    args_kwargs = contents[1].split(", ")
-                    args = []
-                    kwargs = []
-                    #Separate args and kwargs
-                    for i in args_kwargs[1:]:
-                        is_arg = True
-                        for letter in i:
-                            if letter in ("'",'"'):
-                                break
-                            elif letter in ("="):
-                                is_arg = False
-                                break
-                        if is_arg:
-                            args.append(i)
-                        else:
-                            kwargs.append(i)
-                    if args:
-                        print "      Commands: {}".format(", ".join(args))
-                    if kwargs:
-                        print "      Variables: {}".format(", ".join(kwargs))
-        print "Personal ID: {}".format(SceneScript.UID())
+            print "  Script: {}".format(('\n'+self.dict[script]['script']).replace("\n","\n    >>> "))
+            #Print the script callbacks]
+            if self.dict.get(script, None):
+                if self.dict[script].get('callbacks', None):
+                    print "  Callbacks:"
+                    for id in self.dict[script]['callbacks']:
+                        contents=self.dict[script]['callbacks'][id]
+                        print "    ID {}:".format(id)
+                        if contents[2] != SceneScript.UID() and False:
+                            contents[2] = str(contents[2])
+                            contents[2] += " (no match - will not register callback)"
+                        print "      User ID: {}".format(contents[2])
+                        if contents[2] != SceneScript.UID():
+                            print "        - Warning: will not register callback, ID doesn't match"
+                        callbackName = ' '.join(re.findall('[A-Z][a-z]*', allCallbacks[contents[0]]))
+                        print "      Callback {}: {}".format(contents[0], callbackName)
+                        args_kwargs = contents[1].split(", ")
+                        args = []
+                        kwargs = []
+                        #Separate args and kwargs
+                        for i in args_kwargs[1:]:
+                            is_arg = True
+                            for letter in i:
+                                if letter in ("'",'"'):
+                                    break
+                                elif letter in ("="):
+                                    is_arg = False
+                                    break
+                            if is_arg:
+                                args.append(i)
+                            else:
+                                kwargs.append(i)
+                        if args:
+                            print "      Commands: {}".format(", ".join(args))
+                        if kwargs:
+                            print "      Variables: {}".format(", ".join(kwargs))
+            print "Personal ID: {}".format(SceneScript.UID())
+
 
 if first_run:
     OpenMaya.MSceneMessage().addCallback(OpenMaya.MSceneMessage.kBeforeOpen, SceneScript().unregisterAllCallbacks)
